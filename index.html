@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<title>Tikuv sexi hisobi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap">
+<style>
+/* Layout: one phone-width column; a dashed "NAMUNA" band on top for demo-only controls, then the role's own screen. Batch progress is drawn as a tailor's measuring tape. */
+:root{
+  --paper:#EDF0F4; --card:#FFFFFF; --soft:#F5F7FA; --ink:#17202D; --muted:#5A6475; --line:#D8DDE5;
+  --tape:#F2B705; --tape-ink:#2A2000; --chalk:#2E5ECC;
+  --ok:#1C7F51; --ok-bg:#E3F4EC; --warn:#9A5A00; --warn-bg:#FFF1D6; --bad:#BF3A2B; --bad-bg:#FBE6E3;
+  --c-stock:#8B98AC; --c-transit:#5A8BEE; --c-hand:#E39A1C; --c-await:#8A5CF5; --c-rework:#DE5F39; --c-acc:#22A06B; --c-def:#BF3A2B; --c-gap:#5F6672;
+  --shadow:0 1px 2px rgba(23,32,45,.06),0 4px 14px rgba(23,32,45,.06);
+  --f-disp:"Unbounded","Golos Text",system-ui,sans-serif;
+  --f-body:"Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --paper:#10141B; --card:#1A202A; --soft:#222936; --ink:#E7EBF1; --muted:#9AA4B4; --line:#2C3442;
+  --tape:#F2B705; --tape-ink:#2A2000; --chalk:#7EA2F5;
+  --ok:#4CC88C; --ok-bg:#163327; --warn:#F0B44C; --warn-bg:#3A2C12; --bad:#F07A6A; --bad-bg:#3D1E1A;
+  --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark }}
+:root[data-theme="dark"]{
+  --paper:#10141B; --card:#1A202A; --soft:#222936; --ink:#E7EBF1; --muted:#9AA4B4; --line:#2C3442;
+  --tape:#F2B705; --tape-ink:#2A2000; --chalk:#7EA2F5;
+  --ok:#4CC88C; --ok-bg:#163327; --warn:#F0B44C; --warn-bg:#3A2C12; --bad:#F07A6A; --bad-bg:#3D1E1A;
+  --shadow:0 1px 2px rgba(0,0,0,.3); color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.4;-webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+button:focus-visible,textarea:focus-visible,input:focus-visible{outline:3px solid var(--chalk);outline-offset:2px}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--card)}
+.app{max-width:460px;margin:0 auto;min-height:100%;padding-bottom:40px}
+.wrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.num{font-variant-numeric:tabular-nums}
+
+/* demo band */
+.demo{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--card);border-bottom:2px dashed var(--line);padding-block:10px}
+.demo-top{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.badge-demo{font:700 11px/1 var(--f-disp);letter-spacing:.08em;color:var(--tape-ink);padding:6px 8px;border-radius:5px;background:repeating-linear-gradient(135deg,var(--tape) 0 8px,#E2A800 8px 16px)}
+.demo-note{font-size:12.5px;color:var(--muted);flex:1;min-width:0}
+.icon-btn{width:36px;height:36px;border-radius:10px;background:var(--soft);display:grid;place-items:center;font-weight:700;flex:none}
+.roles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.roles button{padding:9px 4px;border-radius:10px;background:var(--soft);font-size:13px;font-weight:600;color:var(--muted);line-height:1.15}
+.roles button[aria-pressed="true"]{background:var(--ink);color:var(--card)}
+
+/* scenario */
+.scen{margin-top:14px;background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:12px 14px}
+.scen-head{display:flex;align-items:center;gap:10px}
+.scen-title{font:600 13px/1.2 var(--f-body);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;flex:1}
+.scen-count{font:700 13px var(--f-disp)}
+.scen-dots{display:flex;gap:4px;margin:10px 0}
+.scen-dots i{flex:1;height:5px;border-radius:3px;background:var(--line)}
+.scen-dots i.done{background:var(--ok)}
+.scen-dots i.now{background:var(--tape)}
+.scen-step{display:flex;align-items:center;gap:10px}
+.scen-step p{margin:0;flex:1;font-weight:600;font-size:15px;text-wrap:balance}
+.scen-step small{display:block;color:var(--muted);font-weight:500;font-size:12.5px}
+.link{color:var(--chalk);font-weight:600;font-size:14px;padding:6px 0}
+
+/* headings */
+.hello{display:flex;align-items:center;gap:12px;margin:20px 0 14px}
+.ava{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font:700 16px var(--f-disp);color:#fff;flex:none}
+.hello h1{font:700 20px/1.15 var(--f-disp);margin:0}
+.hello p{margin:2px 0 0;color:var(--muted);font-size:14px}
+h2{font:600 13px/1.2 var(--f-body);text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:24px 0 10px}
+
+/* buttons */
+.big{display:flex;align-items:center;gap:12px;width:100%;padding:16px;border-radius:16px;background:var(--card);box-shadow:var(--shadow);text-align:left;font-weight:600;font-size:17px}
+.big .ic{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-size:22px;flex:none;background:var(--soft)}
+.big small{display:block;font-weight:500;font-size:13px;color:var(--muted)}
+.big.primary{background:var(--tape);color:var(--tape-ink)}
+.big.primary .ic{background:rgba(0,0,0,.08)}
+.big.primary small{color:rgba(42,32,0,.72)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid2 .big{flex-direction:column;align-items:flex-start;gap:10px}
+.stack{display:grid;gap:10px}
+.btn{display:block;width:100%;padding:16px;border-radius:14px;font-weight:700;font-size:17px;background:var(--tape);color:var(--tape-ink);text-align:center}
+.btn.dark{background:var(--ink);color:var(--card)}
+.btn.ghost{background:var(--soft);color:var(--ink)}
+.btn.ok{background:var(--ok);color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:3px 7px;border-radius:5px;background:var(--soft);color:var(--muted);vertical-align:middle}
+.tag.demo{background:var(--warn-bg);color:var(--warn)}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.bad{background:var(--bad-bg);color:var(--bad)}
+.tag.wait{background:color-mix(in srgb,var(--c-await) 16%,transparent);color:var(--c-await)}
+.tag.transit{background:color-mix(in srgb,var(--c-transit) 16%,transparent);color:var(--c-transit)}
+
+/* cards */
+.card{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:14px}
+.card + .card{margin-top:10px}
+.row{display:flex;align-items:center;gap:10px}
+.grow{flex:1;min-width:0}
+.title{font-weight:700;font-size:16px}
+.sub{color:var(--muted);font-size:13.5px}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12.5px;color:var(--muted)}
+.bignum{font:700 30px/1 var(--f-disp)}
+.bignum small{font:500 14px var(--f-body);color:var(--muted);margin-left:4px}
+.card .actions{margin-top:12px}
+.tap{width:100%;text-align:left}
+.chev{color:var(--muted);font-size:20px}
+
+/* stat tiles */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--card);border-radius:14px;padding:12px 10px;box-shadow:var(--shadow);border-top:4px solid var(--c)}
+.stat b{display:block;font:700 26px/1.05 var(--f-disp)}
+.stat span{font-size:12.5px;color:var(--muted);font-weight:600;line-height:1.2;display:block;margin-top:4px}
+
+/* measuring tape */
+.tape{position:relative;display:flex;height:26px;border-radius:6px;overflow:hidden;background:var(--soft);margin-top:10px}
+.tape i{display:block;height:100%;min-width:0}
+.tape::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(90deg,rgba(0,0,0,.35) 0 1px,transparent 1px 10%) top left/100% 9px no-repeat,
+             repeating-linear-gradient(90deg,rgba(0,0,0,.2) 0 1px,transparent 1px 2%) top left/100% 5px no-repeat}
+.legend{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:8px;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend span::before{content:"";width:9px;height:9px;border-radius:2px;background:var(--c)}
+.legend b{color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* timeline */
+.tl{list-style:none;margin:0;padding:0}
+.tl li{display:grid;grid-template-columns:12px 1fr;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.tl li:last-child{border-bottom:0}
+.tl .dot{width:10px;height:10px;border-radius:50%;margin-top:6px;background:var(--c)}
+.tl .what{font-weight:600}
+.tl .meta{font-size:12.5px;color:var(--muted)}
+
+/* balance */
+.bal{display:grid;grid-template-columns:1fr auto;gap:6px 10px;font-size:14.5px;margin-top:10px}
+.bal .v{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+.bal .hr{grid-column:1/-1;border-top:1px dashed var(--line);margin:2px 0}
+.ok-banner{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:var(--ok-bg);color:var(--ok);font-weight:700}
+.bad-banner{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;background:var(--bad-bg);color:var(--bad);font-weight:700}
+.warn-box{padding:10px 12px;border-radius:12px;background:var(--warn-bg);color:var(--warn);font-size:14px;font-weight:600}
+.empty{padding:18px;text-align:center;color:var(--muted);background:var(--card);border-radius:16px;border:1.5px dashed var(--line);font-size:14.5px}
+
+.seg{display:grid;grid-template-columns:repeat(4,1fr);background:var(--soft);border-radius:12px;padding:4px;gap:4px;margin-top:4px}
+.seg button{padding:9px 2px;border-radius:9px;font-weight:600;font-size:13.5px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+.back{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--chalk);margin:16px 0 4px;padding:4px 0}
+table.t{width:100%;border-collapse:collapse;font-size:14px}
+table.t th{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;text-align:right;padding:6px 4px}
+table.t th:first-child,table.t td:first-child{text-align:left}
+table.t td{padding:8px 4px;border-top:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}
+
+/* sheet */
+.sheet{position:fixed;inset:0;z-index:50}
+.scrim{position:absolute;inset:0;background:rgba(10,14,20,.5);animation:fade .2s}
+.panel{position:absolute;left:0;right:0;bottom:0;margin:0 auto;max-width:460px;max-height:92%;overflow:auto;background:var(--paper);border-radius:22px 22px 0 0;
+  padding:8px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));animation:up .24s ease-out}
+.x{position:absolute;top:10px;right:max(12px,env(safe-area-inset-right,0px));width:36px;height:36px;border-radius:50%;background:var(--soft);font-size:22px;line-height:1;color:var(--muted)}
+.panel{position:absolute}
+.grab{width:44px;height:5px;border-radius:3px;background:var(--line);margin:4px auto 10px}
+.sheet h3{font:700 19px/1.2 var(--f-disp);margin:4px 44px 4px 0;text-wrap:balance}
+.sheet .lead{color:var(--muted);margin:0 0 14px;font-size:14.5px}
+.field{margin:14px 0}
+.lbl{font-size:13px;font-weight:600;color:var(--muted);margin-bottom:7px;display:flex;justify-content:space-between;gap:8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:10px 14px;border-radius:12px;background:var(--card);font-weight:600;box-shadow:var(--shadow);font-size:15px}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--card)}
+.chip small{display:block;font-weight:500;font-size:12px;opacity:.75}
+.stepper{display:grid;grid-template-columns:60px 1fr 60px;align-items:center;background:var(--card);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.stepper button{height:64px;font-size:28px;font-weight:600;background:var(--soft)}
+.stepper button:disabled{opacity:.35}
+.stepper output{text-align:center;font:700 34px var(--f-disp);font-variant-numeric:tabular-nums}
+.stepper output small{font:500 14px var(--f-body);color:var(--muted);margin-left:4px}
+.mini-step{display:grid;grid-template-columns:44px 52px 44px;align-items:center;gap:0;background:var(--soft);border-radius:12px;overflow:hidden}
+.mini-step button{height:44px;font-size:22px;font-weight:600}
+.mini-step output{text-align:center;font:700 20px var(--f-disp);font-variant-numeric:tabular-nums}
+.chk-row{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--card);border-radius:14px;box-shadow:var(--shadow)}
+.chk-row + .chk-row{margin-top:8px}
+.chk-row .sw{width:10px;align-self:stretch;border-radius:4px;background:var(--c)}
+.hint{font-size:13.5px;color:var(--muted);margin-top:8px}
+.err{font-size:14px;color:var(--bad);font-weight:600;margin-top:8px}
+input.txt,textarea.txt{width:100%;padding:13px 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:16px}
+textarea.txt{min-height:88px;resize:vertical}
+.foot{position:sticky;bottom:calc(-18px - env(safe-area-inset-bottom,0px));background:var(--paper);padding-top:12px;margin-top:16px;padding-bottom:4px}
+
+/* voice */
+.mic-off{display:flex;align-items:center;gap:12px;padding:12px;border-radius:14px;border:2px dashed var(--warn);background:var(--warn-bg);color:var(--warn)}
+.mic-off .m{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:var(--card);flex:none;position:relative}
+.mic-off .m::after{content:"";position:absolute;width:56px;height:3px;background:var(--warn);transform:rotate(-45deg);border-radius:2px}
+.mic-off p{margin:0;font-size:13.5px;font-weight:600}
+.pf{display:grid;grid-template-columns:92px 1fr auto;gap:8px;align-items:center;padding:11px 12px;background:var(--card);border-radius:12px;box-shadow:var(--shadow)}
+.pf + .pf{margin-top:6px}
+.pf .k{font-size:13px;color:var(--muted);font-weight:600}
+.pf .v{font-weight:700}
+.src{font-size:11px;font-weight:700;padding:3px 6px;border-radius:5px;white-space:nowrap}
+.src.said{background:var(--ok-bg);color:var(--ok)}
+.src.batch{background:color-mix(in srgb,var(--chalk) 14%,transparent);color:var(--chalk)}
+.src.ask{background:var(--bad-bg);color:var(--bad)}
+
+.algo ol{padding-left:20px;margin:8px 0}
+.algo li{margin:6px 0}
+.algo h4{font:700 15px var(--f-disp);margin:18px 0 6px}
+.algo ul{padding-left:18px;margin:6px 0}
+
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--card);padding:12px 16px;border-radius:14px;font-weight:600;font-size:14.5px;max-width:calc(100% - 32px);box-shadow:0 6px 24px rgba(0,0,0,.25);animation:up .2s}
+@keyframes up{from{transform:translateY(24px);opacity:0}}
+@keyframes fade{from{opacity:0}}
+.toast{animation:none}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+
+
+<div class="app">
+  <div class="demo wrap">
+    <div class="demo-top">
+      <span class="badge-demo">NAMUNA</span>
+      <span class="demo-note">Rol almashtirish faqat namunada. Haqiqiy tizimda rolni server belgilaydi.</span>
+      <button class="icon-btn" data-a="algo" aria-label="Ish algoritmi">?</button>
+    </div>
+    <div class="roles" id="roles"></div>
+  </div>
+  <main class="wrap" id="main"></main>
+</div>
+<div class="sheet" id="sheet" hidden><div class="scrim" data-a="close"></div><div class="panel" role="dialog" aria-modal="true"><div class="grab"></div><button class="x" data-a="close" aria-label="Yopish">×</button><div id="sheetBody"></div></div></div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/* ---------- sample catalog (sinov ma'lumotlari) ---------- */
+const MODELS=['Koʻylak','Shim','Yubka'];
+const FABRICS=[{n:'Qizil paxta',c:'Qizil'},{n:'Koʻk jinsi',c:'Koʻk'},{n:'Oq shtapel',c:'Oq'}];
+const SIZES=['42','44','46','48'];
+const SEWERS=['Ruxshona','Dilnoza','Malika'];
+const TARIFF={'Koʻylak':8000,'Shim':9500,'Yubka':7000}; // NAMUNA tarif, so'm/dona, faqat "tikish" operatsiyasi
+const CUTTER='Sardor';
+const AVA={Ruxshona:'#C2477A',Dilnoza:'#2E8C8C',Malika:'#7A5BD0',Sardor:'#3E6FD8',Tekshiruvchi:'#1C7F51',Rahbar:'#5A4630'};
+const ROLES=[['cutter','Bichuvchi'],['sewer','Tikuvchi'],['checker','Tekshiruvchi'],['owner','Rahbar']];
+const COL={stock:'var(--c-stock)',transit:'var(--c-transit)',inHand:'var(--c-hand)',awaiting:'var(--c-await)',rework:'var(--c-rework)',acc:'var(--c-acc)',def:'var(--c-def)',gap:'var(--c-gap)'};
+const NAMES={stock:'Bichuvda',transit:'Yoʻlda',inHand:'Chala',awaiting:'Tekshiruvda',rework:'Qayta ishlashda',acc:'Qabul qilingan',def:'Brak',gap:'Tafovut'};
+
+let S;
+function seed(){
+  S={role:'cutter',sewer:'Ruxshona',ownerTab:'sum',ownerBatch:null,ownerPerson:null,sawOwner:false,seq:1031,hid:1,cid:1,gid:1,
+    batches:[{id:'P-1028',model:'Shim',fabric:'Koʻk jinsi',color:'Koʻk',size:'48',cut:60,meters:84,date:'29-sentabr',thisMonth:false,stock:0,acc:0,accPrev:48,def:0,gap:0,demo:false}],
+    hold:{'P-1028':{Dilnoza:{transit:0,inHand:12,awaiting:0,rework:0}}},
+    handoffs:[],claims:[],gaps:[],
+    fabricM:{'Qizil paxta':320,'Koʻk jinsi':64,'Oq shtapel':150},
+    pay:{Ruxshona:0,Dilnoza:0,Malika:0},accCount:{Ruxshona:0,Dilnoza:0,Malika:0},
+    events:[
+      {t:'29-sen 09:10',who:CUTTER,act:'cut',qty:60,b:'P-1028',txt:'60 dona bichildi'},
+      {t:'29-sen 09:40',who:CUTTER,act:'issue',qty:60,b:'P-1028',p:'Dilnoza',txt:'Dilnozaga 60 dona berildi'},
+      {t:'29-sen 09:55',who:'Dilnoza',act:'receive',qty:60,b:'P-1028',p:'Dilnoza',txt:'Dilnoza 60 donani sanab qabul qildi'},
+      {t:'30-sen 18:20',who:'Tekshiruvchi',act:'acc',qty:48,b:'P-1028',p:'Dilnoza',txt:'48 dona tekshirilib qabul qilindi (sentabr)'},
+      {t:'1-okt 00:00',who:'Tizim',act:'month',qty:12,b:'P-1028',p:'Dilnoza',txt:'Oy boshidagi qoldiq: Dilnozada 12 dona chala'}
+    ]};
+}
+seed();
+const OPENING=12;
+
+/* ---------- helpers ---------- */
+const $=s=>document.querySelector(s);
+const fmt=n=>String(n).replace(/\B(?=(\d{3})+(?!\d))/g,' ');
+const now=()=>{const d=new Date();return 'Bugun '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
+const B=id=>S.batches.find(b=>b.id===id);
+const H=(b,p)=>{S.hold[b]=S.hold[b]||{};return S.hold[b][p]=S.hold[b][p]||{transit:0,inHand:0,awaiting:0,rework:0}};
+const label=b=>`${b.model} · ${b.fabric} · ${b.size}`;
+const ava=(n,s=44)=>`<span class="ava" style="background:${AVA[n]||'#667'};width:${s}px;height:${s}px;font-size:${Math.round(s/2.8)}px">${n[0]}</span>`;
+function log(e){S.events.unshift({t:now(),...e})}
+function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2600)}
+function sumHold(bid,key){const h=S.hold[bid]||{};return Object.values(h).reduce((a,x)=>a+x[key],0)}
+function buckets(b){return{stock:b.stock,transit:sumHold(b.id,'transit'),inHand:sumHold(b.id,'inHand'),awaiting:sumHold(b.id,'awaiting'),rework:sumHold(b.id,'rework'),acc:b.acc+b.accPrev,def:b.def,gap:b.gap}}
+function tape(bk,total){
+  const keys=['acc','awaiting','rework','inHand','transit','stock','def','gap'];
+  const segs=keys.filter(k=>bk[k]>0).map(k=>`<i style="flex:${bk[k]} 0 0;background:${COL[k]}" title="${NAMES[k]}: ${bk[k]}"></i>`).join('');
+  const leg=keys.filter(k=>bk[k]!==0).map(k=>`<span style="--c:${COL[k]}">${NAMES[k]} <b>${bk[k]}</b></span>`).join('');
+  return `<div class="tape" role="img" aria-label="Taqsimot">${segs}</div><div class="legend">${leg}</div>`;
+}
+
+/* ---------- accounting actions (each enforces its limits) ---------- */
+function openBatch(o){
+  const id='P-'+(S.seq++);
+  if(o.meters>0){S.fabricM[o.fabric]=+(S.fabricM[o.fabric]-o.meters).toFixed(1)}
+  const color=FABRICS.find(f=>f.n===o.fabric).c;
+  S.batches.unshift({id,model:o.model,fabric:o.fabric,color,size:o.size,cut:o.qty,meters:o.meters||0,date:'31-oktabr',thisMonth:true,stock:o.qty,acc:0,accPrev:0,def:0,gap:0,demo:true});
+  log({who:CUTTER,act:'cut',qty:o.qty,b:id,txt:`${o.qty} dona bichildi${o.meters?` · mato ${o.meters} m sarflandi`:''}`});
+  return id;
+}
+function issue(bid,p,qty,via){
+  const b=B(bid); if(qty<1||qty>b.stock) return false;
+  b.stock-=qty; H(bid,p).transit+=qty;
+  const h={id:S.hid++,b:bid,p,qty,status:'transit',t:now(),via};
+  S.handoffs.unshift(h);
+  log({who:CUTTER,act:'issue',qty,b:bid,p,txt:`${p}ga ${qty} dona berildi${via?' · '+via:''}`});
+  return true;
+}
+function receive(hid,count){
+  const h=S.handoffs.find(x=>x.id===hid); if(!h||h.status!=='transit') return;
+  const hd=H(h.b,h.p); hd.transit-=h.qty; hd.inHand+=count; h.status='received'; h.got=count;
+  log({who:h.p,act:'receive',qty:count,b:h.b,p:h.p,txt:`${h.p} ${count} donani sanab qabul qildi`});
+  if(count!==h.qty){const d=count-h.qty;B(h.b).gap-=d;
+    S.gaps.unshift({id:S.gid++,b:h.b,p:h.p,diff:d,where:'Tikuvchi qabulida',t:now(),status:'open'});
+    log({who:h.p,act:'gap',qty:d,b:h.b,p:h.p,txt:`Tafovut: berilgan ${h.qty}, sanalgan ${count} (${d>0?'+':''}${d})`});}
+}
+function ready(bid,p,qty,fromRework){
+  const hd=H(bid,p); const src=fromRework?'rework':'inHand'; if(qty<1||qty>hd[src]) return false;
+  hd[src]-=qty; hd.awaiting+=qty;
+  S.claims.unshift({id:S.cid++,b:bid,p,qty,status:'pending',t:now(),rework:!!fromRework});
+  log({who:p,act:'ready',qty,b:bid,p,txt:`${p}: ${qty} dona tayyor deb bildirdi${fromRework?' (qayta ishlangan)':''} · ${hd.inHand} chala qoldi`});
+  return true;
+}
+function check(cid,r){
+  const c=S.claims.find(x=>x.id===cid); if(!c||c.status!=='pending') return; // bir topshiriq faqat bir marta tekshiriladi
+  const acc=c.qty-r.ret-r.def-r.miss; if(acc<0) return;
+  const b=B(c.b), hd=H(c.b,c.p);
+  hd.awaiting-=c.qty; b.acc+=acc; hd.rework+=r.ret; b.def+=r.def; b.gap+=r.miss;
+  const money=acc*TARIFF[b.model]; S.pay[c.p]+=money; S.accCount[c.p]+=acc;
+  c.status='checked'; c.res={acc,...r};
+  log({who:'Tekshiruvchi',act:'acc',qty:acc,b:c.b,p:c.p,txt:`${acc} dona qabul qilindi · ${c.p}ga ${fmt(money)} soʻm (namuna tarif)`});
+  if(r.ret) log({who:'Tekshiruvchi',act:'ret',qty:r.ret,b:c.b,p:c.p,txt:`${r.ret} dona qaytarildi: ${r.reason}`});
+  if(r.def) log({who:'Tekshiruvchi',act:'def',qty:r.def,b:c.b,p:c.p,txt:`${r.def} dona brak: ${r.defReason}`});
+  if(r.miss){S.gaps.unshift({id:S.gid++,b:c.b,p:c.p,diff:-r.miss,where:'Tekshiruvda topilmadi',t:now(),status:'open'});
+    log({who:'Tekshiruvchi',act:'gap',qty:-r.miss,b:c.b,p:c.p,txt:`Tafovut: ${r.miss} dona sanoqda chiqmadi`});}
+}
+
+/* ---------- scenario 100 → 10 → 8 + 2 ---------- */
+function scen(){
+  const rx=S.handoffs.filter(h=>h.p==='Ruxshona'), cl=S.claims.filter(c=>c.p==='Ruxshona');
+  return [
+    {d:S.batches.some(b=>b.demo),role:'cutter',open:'newBatch',p:'100 dona koʻylak bichildi',who:'Bichuvchi'},
+    {d:rx.length>0,role:'cutter',open:'give',p:'Ruxshonaga 10 dona berildi',who:'Bichuvchi · tugma yoki ovoz namunasi'},
+    {d:rx.some(h=>h.status==='received'),role:'sewer',p:'Ruxshona sanab qabul qildi',who:'Tikuvchi'},
+    {d:cl.length>0,role:'sewer',p:'8 tasini tayyor dedi, 2 tasi chala qoldi',who:'Tikuvchi'},
+    {d:cl.some(c=>c.status==='checked'),role:'checker',p:'Tekshiruvchi 8 tasini qabul qildi',who:'Tekshiruvchi (siz)'},
+    {d:S.sawOwner&&cl.some(c=>c.status==='checked'),role:'owner',p:'Dadam hisobni ochib koʻrdi',who:'Rahbar'}
+  ];
+}
+function scenCard(){
+  const st=scen(), i=st.findIndex(x=>!x.d), done=i<0?6:i;
+  const dots=st.map((x,k)=>`<i class="${x.d?'done':k===i?'now':''}"></i>`).join('');
+  const cur=i<0?`<div class="scen-step"><p>Jarayon tugadi. 100 = 90 bichuvda + 2 chala + 8 qabul.<small>Rahbar ekranida har bir sonni ochib koʻring.</small></p><button class="link" data-a="reset">Qayta</button></div>`
+    :`<div class="scen-step"><p>${i+1}. ${st[i].p}<small>${st[i].who}</small></p>${S.role!==st[i].role||st[i].open?`<button class="btn" style="width:auto;padding:10px 14px;font-size:15px" data-a="go" data-i="${i}">Bajarish</button>`:''}</div>`;
+  return `<section class="scen"><div class="scen-head"><span class="scen-title">Namuna jarayoni 100 → 10 → 8 + 2</span><span class="scen-count">${done}/6</span></div><div class="scen-dots">${dots}</div>${cur}</section>`;
+}
+
+/* ---------- screens ---------- */
+function render(){
+  $('#roles').innerHTML=ROLES.map(([k,n])=>`<button data-a="role" data-r="${k}" aria-pressed="${S.role===k}">${n}</button>`).join('');
+  if(S.role==='owner') S.sawOwner=true;
+  $('#main').innerHTML=scenCard()+({cutter,sewer,checker,owner})[S.role]();
+}
+
+function cutter(){
+  const open=S.batches.filter(b=>b.thisMonth||b.stock>0);
+  const today=S.handoffs;
+  return `<div class="hello">${ava(CUTTER)}<div><h1>${CUTTER}</h1><p>Bichuvchi</p></div></div>
+  <div class="stack">
+    <button class="big primary" data-a="open" data-s="newBatch"><span class="ic">✂︎</span><span>Yangi partiya<small>Qancha bichildi</small></span></button>
+    <div class="grid2">
+      <button class="big" data-a="open" data-s="give"><span class="ic">➜</span><span>Tikuvchiga berish<small>Kimga, nechta</small></span></button>
+      <button class="big" data-a="open" data-s="voice"><span class="ic">🎙</span><span>Gapirib berish<small><span class="tag demo">namuna</span></small></span></button>
+    </div>
+  </div>
+  <h2>Partiyalar</h2>
+  ${open.length?open.map(b=>`<div class="card"><div class="row"><div class="grow"><div class="title">${label(b)}</div><div class="mono">${b.id} · ${b.date}</div></div><div class="bignum num">${b.stock}<small>/ ${b.cut}</small></div></div><div class="sub" style="margin-top:4px">Tarqatilmagan qoldiq</div>${tape(buckets(b),b.cut)}</div>`).join(''):`<div class="empty">Bu oy partiya yoʻq. «Yangi partiya» bilan boshlang.</div>`}
+  <h2>Bugun berilgan</h2>
+  ${today.length?`<div class="card">${today.map(h=>`<div class="row" style="padding:6px 0">${ava(h.p,34)}<div class="grow"><b>${h.p}</b> · ${h.qty} dona<div class="sub">${label(B(h.b))} · ${h.t.replace('Bugun ','')}</div></div>${h.status==='transit'?'<span class="tag transit">Qabul kutilmoqda</span>':h.got===h.qty?`<span class="tag ok">Qabul qildi</span>`:`<span class="tag bad">${h.got} sanaldi</span>`}</div>`).join('')}</div>`:`<div class="empty">Hali hech kimga berilmadi.</div>`}`;
+}
+
+function sewer(){
+  const p=S.sewer;
+  const incoming=S.handoffs.filter(h=>h.p===p&&h.status==='transit');
+  const rows=Object.entries(S.hold).map(([bid,o])=>({b:B(bid),h:o[p]})).filter(x=>x.h);
+  const hand=rows.reduce((a,x)=>a+x.h.inHand,0), wait=rows.reduce((a,x)=>a+x.h.awaiting,0), rew=rows.filter(x=>x.h.rework>0);
+  const pend=S.claims.filter(c=>c.p===p&&c.status==='pending');
+  return `<div class="chips" style="margin-top:14px"><span class="sub" style="align-self:center">Namuna uchun tikuvchi:</span>${SEWERS.map(n=>`<button class="chip" style="padding:7px 11px;font-size:14px" data-a="sewer" data-p="${n}" aria-pressed="${n===p}">${n}</button>`).join('')}</div>
+  <div class="hello">${ava(p)}<div class="grow"><h1>${p}</h1><p>Tikuvchi · bu oy <b class="num">${fmt(S.pay[p])}</b> soʻm <span class="tag demo">namuna tarif</span></p></div></div>
+  <div class="stats">
+    <div class="stat" style="--c:var(--c-hand)"><b class="num">${hand}</b><span>Chala, qoʻlimda</span></div>
+    <div class="stat" style="--c:var(--c-await)"><b class="num">${wait}</b><span>Tekshiruvda</span></div>
+    <div class="stat" style="--c:var(--c-acc)"><b class="num">${S.accCount[p]}</b><span>Qabul qilindi</span></div>
+  </div>
+  ${incoming.length?`<h2>Sizga kelgan ish</h2>`+incoming.map(h=>`<div class="card"><div class="row"><div class="grow"><div class="title">${label(B(h.b))}</div><div class="mono">${h.b} · ${CUTTER} berdi · ${h.t}</div></div><div class="bignum num">${h.qty}</div></div><div class="actions"><button class="btn" data-a="open" data-s="receive" data-h="${h.id}">Sanab qabul qilish</button></div></div>`).join(''):''}
+  <h2>Qoʻlimdagi chala ish</h2>
+  ${rows.filter(x=>x.h.inHand>0).length?rows.filter(x=>x.h.inHand>0).map(x=>`<div class="card"><div class="row"><div class="grow"><div class="title">${label(x.b)}</div><div class="mono">${x.b.id}${x.b.thisMonth?'':' · oʻtgan oydan'}</div></div><div class="bignum num" style="color:var(--c-hand)">${x.h.inHand}</div></div><div class="actions"><button class="btn dark" data-a="open" data-s="ready" data-b="${x.b.id}">Tayyorini topshirish</button></div></div>`).join(''):`<div class="empty">Qoʻlingizda chala ish yoʻq.</div>`}
+  ${rew.length?`<h2>Qaytarilgan, tuzatish kerak</h2>`+rew.map(x=>`<div class="card"><div class="row"><div class="grow"><div class="title">${label(x.b)}</div><div class="sub">Yangi dona emas, oʻsha mahsulot</div></div><div class="bignum num" style="color:var(--c-rework)">${x.h.rework}</div></div><div class="actions"><button class="btn ghost" data-a="open" data-s="rework" data-b="${x.b.id}">Tuzatdim, topshiraman</button></div></div>`).join(''):''}
+  ${pend.length?`<h2>Tekshiruvni kutmoqda</h2><div class="card">`+pend.map(c=>`<div class="row" style="padding:5px 0"><div class="grow"><b>${c.qty} dona</b> · ${label(B(c.b))}<div class="sub">${c.t}${c.rework?' · qayta ishlangan':''}</div></div><span class="tag wait">Kutilmoqda</span></div>`).join('')+`<div class="hint">«Tayyor» dedingiz, lekin pul tekshiruvchi qabul qilgandan keyin yoziladi.</div></div>`:''}`;
+}
+
+function checker(){
+  const q=S.claims.filter(c=>c.status==='pending'), done=S.claims.filter(c=>c.status==='checked');
+  return `<div class="hello">${ava('Tekshiruvchi')}<div><h1>Tekshiruv</h1><p>Sanab, sifatini koʻrib qabul qiling</p></div></div>
+  <h2>Navbatda · ${q.reduce((a,c)=>a+c.qty,0)} dona</h2>
+  ${q.length?q.map(c=>`<div class="card"><div class="row">${ava(c.p,38)}<div class="grow"><div class="title">${c.p} · ${c.qty} dona tayyor</div><div class="sub">${label(B(c.b))} · ${c.b}</div><div class="mono">${c.t}${c.rework?' · qayta ishlangan':''}</div></div></div><div class="actions"><button class="btn" data-a="open" data-s="check" data-c="${c.id}">Sanash va tekshirish</button></div></div>`).join(''):`<div class="empty">Tekshiriladigan ish yoʻq.</div>`}
+  ${done.length?`<h2>Bugun tekshirilgan</h2><div class="card">`+done.map(c=>`<div class="row" style="padding:6px 0"><div class="grow"><b>${c.p}</b> · ${c.qty} dona<div class="sub">${label(B(c.b))}</div></div><span class="tag ok">${c.res.acc} qabul</span>${c.res.ret?`<span class="tag bad">${c.res.ret} qayt.</span>`:''}${c.res.def?`<span class="tag bad">${c.res.def} brak</span>`:''}</div>`).join('')+`</div>`:''}`;
+}
+
+function totals(){
+  const all=S.batches.map(buckets), sum=k=>all.reduce((a,x)=>a+x[k],0);
+  const cutM=S.batches.filter(b=>b.thisMonth).reduce((a,b)=>a+b.cut,0);
+  const closing=sum('stock')+sum('transit')+sum('inHand')+sum('awaiting')+sum('rework');
+  const accM=S.batches.reduce((a,b)=>a+b.acc,0), def=sum('def'), gap=sum('gap');
+  return {cutM,closing,accM,def,gap,ok:OPENING+cutM===closing+accM+def+gap,
+    cur:{stock:sum('stock'),transit:sum('transit'),inHand:sum('inHand'),awaiting:sum('awaiting'),rework:sum('rework'),acc:accM,def,gap}};
+}
+function owner(){
+  const tabs=[['sum','Umumiy'],['bat','Partiya'],['ppl','Xodimlar'],['gap','Tafovut']];
+  const openGaps=S.gaps.filter(g=>g.status==='open').length;
+  let body='';
+  if(S.ownerBatch) body=ownerBatch(B(S.ownerBatch));
+  else if(S.ownerPerson) body=ownerPerson(S.ownerPerson);
+  else body=({sum:ownerSum,bat:ownerBatches,ppl:ownerPeople,gap:ownerGaps})[S.ownerTab]();
+  return `<div class="hello">${ava('Rahbar')}<div><h1>Oktabr hisobi</h1><p>Rahbar · tafsilot faqat bosganda ochiladi</p></div></div>
+  <div class="seg">${tabs.map(([k,n])=>`<button data-a="otab" data-t="${k}" aria-pressed="${S.ownerTab===k&&!S.ownerBatch&&!S.ownerPerson}">${n}${k==='gap'&&openGaps?` (${openGaps})`:''}</button>`).join('')}</div>${body}`;
+}
+function ownerSum(){
+  const T=totals();
+  return `<div style="margin-top:16px">${T.gap===0?`<div class="ok-banner">✓ Hisob mos. Tafovut yoʻq.</div>`:`<div class="bad-banner">! Tafovut: ${T.gap>0?T.gap+' dona yetishmaydi':(-T.gap)+' dona ortiq'}${S.gaps.some(g=>g.status==='open')?' · sababi kutilmoqda':' · sababi yozilgan'}</div>`}</div>
+  <h2>Hozir mahsulot qayerda</h2>
+  <div class="card"><div class="row"><div class="grow sub">Barcha partiyalar, dona</div></div>${tape(T.cur)}</div>
+  <h2>Oy tenglamasi</h2>
+  <div class="card"><div class="bal">
+    <span>Oy boshidagi qoldiq</span><span class="v">${OPENING}</span>
+    <span>+ Yangi bichilgan</span><span class="v">${T.cutM}</span>
+    <div class="hr"></div><span><b>Kirim jami</b></span><span class="v">${OPENING+T.cutM}</span>
+    <div class="hr"></div>
+    <span>Yakuniy qoldiq (bichuv, yoʻl, chala, tekshiruv, qayta ishlash)</span><span class="v">${T.closing}</span>
+    <span>+ Tekshirilib topshirilgan tayyor</span><span class="v">${T.accM}</span>
+    <span>+ Brak (qayd etilgan chiqim)</span><span class="v">${T.def}</span>
+    <span>+ Tafovut (alohida, sababi bilan)</span><span class="v" style="color:${T.gap?'var(--bad)':'inherit'}">${T.gap}</span>
+    <div class="hr"></div><span><b>Chiqim va qoldiq jami</b></span><span class="v">${T.closing+T.accM+T.def+T.gap}</span>
+  </div><div class="hint">Ichki topshirishlar (bichuvchi → tikuvchi) kirim emas, shuning uchun ikki marta sanalmaydi. Oy oxirida qolgan chala ish keyingi oyga qoldiq boʻlib oʻtadi.</div></div>
+  <h2>Mato qoldigʻi · metr</h2>
+  <div class="card"><table class="t"><tr><th>Mato</th><th>Qoldiq, m</th></tr>${Object.entries(S.fabricM).map(([k,v])=>`<tr><td>${k}</td><td>${String(v).replace('.',',')} m</td></tr>`).join('')}</table><div class="hint">Mato metrda alohida yuritiladi, dona kiyim bilan qoʻshilmaydi.</div></div>`;
+}
+function ownerBatches(){
+  return `<h2>Partiyalar</h2>`+S.batches.map(b=>`<button class="card tap" data-a="obatch" data-b="${b.id}" style="display:block"><div class="row"><div class="grow"><div class="title">${label(b)}</div><div class="mono">${b.id} · ${b.date} · ${b.cut} dona bichilgan</div></div><span class="chev">›</span></div>${tape(buckets(b))}</button>`).join('');
+}
+function evList(f){
+  const ev=S.events.filter(f);
+  const c={cut:'var(--c-stock)',issue:'var(--c-transit)',receive:'var(--c-hand)',ready:'var(--c-await)',acc:'var(--c-acc)',ret:'var(--c-rework)',def:'var(--c-def)',gap:'var(--c-gap)',month:'var(--line)',fix:'var(--chalk)'};
+  return ev.length?`<div class="card"><ul class="tl">${ev.map(e=>`<li><span class="dot" style="--c:${c[e.act]}"></span><div><div class="what">${e.txt}</div><div class="meta">${e.b} · ${e.t} · kiritdi: ${e.who}</div></div></li>`).join('')}</ul></div>`:`<div class="empty">Yozuv yoʻq.</div>`;
+}
+function ownerBatch(b){
+  const hs=S.hold[b.id]||{};
+  return `<button class="back" data-a="oback">‹ Orqaga</button>
+  <div class="card"><div class="title">${label(b)}</div><div class="mono">${b.id} · rang: ${b.color} · ${b.date}</div>
+  <div class="row" style="margin-top:10px;gap:18px"><div><div class="bignum num">${b.cut}</div><div class="sub">dona bichilgan</div></div>${b.meters?`<div><div class="bignum num">${String(b.meters).replace('.',',')}<small>m</small></div><div class="sub">mato sarfi</div></div>`:''}</div>${tape(buckets(b))}</div>
+  <h2>Tikuvchilar boʻyicha</h2>
+  <div class="card" style="overflow-x:auto"><table class="t"><tr><th>Kim</th><th>Yoʻlda</th><th>Chala</th><th>Tekshiruvda</th><th>Qayta</th></tr>${Object.entries(hs).map(([p,h])=>`<tr><td>${p}</td><td>${h.transit}</td><td>${h.inHand}</td><td>${h.awaiting}</td><td>${h.rework}</td></tr>`).join('')||'<tr><td colspan="5">Hali tarqatilmagan</td></tr>'}</table></div>
+  <h2>Har bir son qayerdan keldi</h2>${evList(e=>e.b===b.id)}`;
+}
+function ownerPeople(){
+  return `<h2>Tikuvchilar</h2>`+SEWERS.map(p=>{const r=Object.values(S.hold).map(o=>o[p]).filter(Boolean);const s=k=>r.reduce((a,h)=>a+h[k],0);
+    return `<button class="card tap" data-a="operson" data-p="${p}" style="display:block"><div class="row">${ava(p,38)}<div class="grow"><div class="title">${p}</div><div class="sub">Chala ${s('inHand')} · tekshiruvda ${s('awaiting')} · qabul ${S.accCount[p]}</div></div><div style="text-align:right"><b class="num">${fmt(S.pay[p])}</b><div class="sub">soʻm</div></div><span class="chev">›</span></div></button>`}).join('')
+  +`<div class="hint">Ish haqi faqat tekshirilib qabul qilingan «tikish» operatsiyasi uchun, namuna tarif boʻyicha: ${MODELS.map(m=>`${m} ${fmt(TARIFF[m])}`).join(', ')} soʻm/dona. Davomat soati bu yerga kirmaydi.</div>`;
+}
+function ownerPerson(p){
+  return `<button class="back" data-a="oback">‹ Orqaga</button><div class="hello" style="margin-top:6px">${ava(p)}<div><h1>${p}</h1><p>Bu oy ${fmt(S.pay[p])} soʻm <span class="tag demo">namuna tarif</span></p></div></div>${evList(e=>e.p===p)}`;
+}
+function ownerGaps(){
+  return `<h2>Tafovutlar</h2>`+(S.gaps.length?S.gaps.map(g=>`<div class="card"><div class="row"><div class="grow"><div class="title">${g.p} · ${g.diff>0?'+':''}${g.diff} dona</div><div class="sub">${g.where} · ${g.b} · ${g.t}</div>${g.status==='done'?`<div class="sub" style="margin-top:4px">Sabab: ${g.reason} · tasdiqladi: Rahbar</div>`:''}</div>${g.status==='open'?`<button class="btn ghost" style="width:auto;padding:10px 12px;font-size:14px" data-a="open" data-s="gapfix" data-g="${g.id}">Sabab</button>`:'<span class="tag ok">Yopildi</span>'}</div></div>`).join(''):`<div class="empty">Tafovut yoʻq. Sanoq har bosqichda mos kelgan.</div>`)
+  +`<div class="hint">Tafovut sonlarni majburan tenglashtirmaydi. U alohida qator boʻlib qoladi, sababi va kim tasdiqlagani saqlanadi.</div>`;
+}
+
+/* ---------- sheets ---------- */
+let SH=null;
+function openSheet(o){SH=o;$('#sheet').hidden=false;renderSheet();}
+function closeSheet(){SH=null;$('#sheet').hidden=true;}
+function chips(name,list,val,fmtc){return `<div class="chips">${list.map(x=>{const v=typeof x==='object'?x.v:x;return `<button class="chip" data-a="set" data-k="${name}" data-v="${v}" aria-pressed="${String(val)===String(v)}">${fmtc?fmtc(x):v}</button>`}).join('')}</div>`}
+function stepper(k,val,max,unit='dona'){return `<div class="stepper"><button data-a="inc" data-k="${k}" data-d="-1" ${val<=1?'disabled':''} aria-label="Kamaytirish">−</button><output class="num">${val}<small>${unit}</small></output><button data-a="inc" data-k="${k}" data-d="1" ${val>=max?'disabled':''} aria-label="Koʻpaytirish">+</button></div>`}
+
+function renderSheet(){
+  const s=SH, el=$('#sheetBody'); if(!s) return;
+  const f=({newBatch:shNew,give:shGive,voice:shVoice,receive:shRecv,ready:shReady,rework:shReady,check:shCheck,gapfix:shGap,algo:shAlgo})[s.type];
+  el.innerHTML=f(s);
+}
+function shNew(s){
+  const fab=FABRICS.find(f=>f.n===s.fabric); const mErr=s.meters>S.fabricM[s.fabric];
+  return `<h3>Yangi partiya</h3><p class="lead">Bugun bichilganini kiriting. Namuna katalogi.</p>
+  <div class="field"><div class="lbl">Model</div>${chips('model',MODELS,s.model)}</div>
+  <div class="field"><div class="lbl">Mato</div>${chips('fabric',FABRICS.map(f=>({v:f.n,c:f.c})),s.fabric,x=>`${x.v}<small>rang: ${x.c}</small>`)}</div>
+  <div class="field"><div class="lbl">Razmer</div>${chips('size',SIZES,s.size)}</div>
+  <div class="field"><div class="lbl"><span>Nechta bichildi</span><span>dona</span></div>${stepper('qty',s.qty,500)}<div class="chips" style="margin-top:8px">${[50,80,100].map(n=>`<button class="chip" data-a="set" data-k="qty" data-v="${n}" data-num="1">${n}</button>`).join('')}</div></div>
+  <div class="field"><div class="lbl"><span>Sarflangan mato (ixtiyoriy)</span><span>metr · omborda ${String(S.fabricM[s.fabric]).replace('.',',')} m</span></div><input class="txt num" id="meters" inputmode="decimal" placeholder="masalan, 140" value="${s.meters||''}">${mErr?`<div class="err">Omborda ${s.fabric} faqat ${S.fabricM[s.fabric]} m bor.</div>`:''}<div class="hint">Metr alohida hisob. Dona bilan qoʻshilmaydi.</div></div>
+  <div class="foot"><button class="btn" data-a="doNew" ${mErr?'disabled':''}>${s.qty} dona · ${s.model} · ${fab.c} · ${s.size} — ochish</button></div>`;
+}
+function shGive(s){
+  const av=S.batches.filter(b=>b.stock>0);
+  if(!av.length) return `<h3>Tikuvchiga berish</h3><div class="empty">Tarqatiladigan mahsulot yoʻq. Avval partiya oching.</div><div class="foot"><button class="btn" data-a="open" data-s="newBatch">Yangi partiya</button></div>`;
+  if(!B(s.bid)||B(s.bid).stock<1) s.bid=av[0].id;
+  const b=B(s.bid), over=s.qty>b.stock;
+  return `<h3>Tikuvchiga berish</h3><p class="lead">Tikuvchi sanab qabul qilmaguncha ish «yoʻlda» turadi.</p>
+  <div class="field"><div class="lbl">Partiya</div>${chips('bid',av.map(b=>({v:b.id,b})),s.bid,x=>`${label(x.b)}<small>${x.v} · qoldiq ${x.b.stock}</small>`)}</div>
+  <div class="field"><div class="lbl">Kimga</div><div class="chips">${SEWERS.map(p=>`<button class="chip" data-a="set" data-k="p" data-v="${p}" aria-pressed="${s.p===p}" style="display:flex;align-items:center;gap:8px">${ava(p,28)}${p}</button>`).join('')}</div></div>
+  <div class="field"><div class="lbl"><span>Nechta</span><span>bichuvda ${b.stock} dona</span></div>${stepper('qty',s.qty,b.stock)}<div class="chips" style="margin-top:8px">${[5,8,10].map(n=>`<button class="chip" data-a="set" data-k="qty" data-v="${n}" data-num="1">${n}</button>`).join('')}</div>${over?`<div class="err">Bichuvda faqat ${b.stock} dona bor. Ortigʻini berib boʻlmaydi.</div>`:''}</div>
+  <div class="foot"><button class="btn" data-a="doGive" ${over||!s.p?'disabled':''}>${s.p||'…'}ga ${s.qty} dona berish</button></div>`;
+}
+/* voice: text parsing demo, no microphone */
+const norm=t=>t.toLowerCase().replace(/[ʻʼ'‘’`]/g,'');
+const WORDN={bir:1,ikki:2,uch:3,tort:4,besh:5,olti:6,yetti:7,sakkiz:8,toqqiz:9,on:10,yigirma:20,ottiz:30};
+function parse(text){
+  const t=norm(text), r={};
+  const sw=SEWERS.find(p=>t.includes(norm(p))); if(sw) r.p=sw;
+  let m=t.match(/(\d+|bir|ikki|uch|tort|besh|olti|yetti|sakkiz|toqqiz|on|yigirma|ottiz)\s*(ta|dona)\b/); if(m) r.qty=/\d/.test(m[1])?+m[1]:WORDN[m[1]];
+  const md=MODELS.find(x=>t.includes(norm(x))); if(md) r.model=md;
+  const fb=FABRICS.find(f=>t.includes(norm(f.n))); if(fb){r.fabric=fb.n;r.color=fb.c} else {const c=FABRICS.find(f=>t.includes(norm(f.c))); if(c) r.color=c.c;}
+  m=t.match(/(\d{2})\s*(razmer|olcham)|(razmer|olcham)\s*(\d{2})/); if(m) r.size=m[1]||m[4];
+  return r;
+}
+function voiceResolve(s){
+  const r=s.parsed; if(!r) return null;
+  const said={...r};
+  const cand=S.batches.filter(b=>b.stock>0&&(!r.model||b.model===r.model)&&(!r.fabric||b.fabric===r.fabric)&&(!r.color||b.color===r.color)&&(!r.size||b.size===r.size));
+  let b=null; if(s.bid&&cand.some(x=>x.id===s.bid)) b=B(s.bid); else if(cand.length===1) b=cand[0];
+  return {said,cand,b,p:r.p||s.p,qty:r.qty||s.qty};
+}
+function shVoice(s){
+  const R=voiceResolve(s);
+  let out='';
+  if(R){
+    const row=(k,v,src)=>`<div class="pf"><span class="k">${k}</span><span class="v">${v||'—'}</span><span class="src ${src}">${src==='said'?'gapdan':src==='batch'?'partiyadan':'aniqlanmadi'}</span></div>`;
+    const b=R.b, sd=R.said;
+    out+=`<div class="field"><div class="lbl">Tizim ajratgan maydonlar</div>
+      ${row('Kimga',R.p,sd.p?'said':R.p?'said':'ask')}
+      ${!R.p?`<div class="chips" style="margin:6px 0 8px">${SEWERS.map(p=>`<button class="chip" data-a="set" data-k="p" data-v="${p}">${p}</button>`).join('')}</div>`:''}
+      ${row('Soni',R.qty?R.qty+' dona':'',R.qty?'said':'ask')}
+      ${!R.qty?`<div class="chips" style="margin:6px 0 8px">${[5,8,10].map(n=>`<button class="chip" data-a="set" data-k="qty" data-v="${n}" data-num="1">${n}</button>`).join('')}</div>`:''}
+      ${row('Model',sd.model||b?.model,sd.model?'said':b?'batch':'ask')}
+      ${row('Mato',sd.fabric||b?.fabric,sd.fabric?'said':b?'batch':'ask')}
+      ${row('Rang',sd.color||b?.color,sd.color?'said':b?'batch':'ask')}
+      ${row('Razmer',sd.size||b?.size,sd.size?'said':b?'batch':'ask')}
+      ${row('Partiya',b?.id,b?'batch':'ask')}</div>`;
+    if(!R.cand.length) out+=`<div class="warn-box">Aytilganga mos ochiq partiya topilmadi. Tizim oʻzidan hech narsa qoʻshmaydi: avval partiya oching yoki gapni aniqlashtiring.</div>`;
+    else if(!b) out+=`<div class="field"><div class="lbl">Bir nechta partiya mos keldi. Qaysi biri?</div>${chips('bid',R.cand.map(x=>({v:x.id,b:x})),s.bid,x=>`${label(x.b)}<small>${x.v} · qoldiq ${x.b.stock}</small>`)}</div>`;
+    const over=b&&R.qty>b.stock;
+    if(over) out+=`<div class="err">Partiyada faqat ${b.stock} dona bor.</div>`;
+    const ok=b&&R.p&&R.qty&&!over;
+    out+=`<div class="foot"><button class="btn" data-a="doVoice" ${ok?'':'disabled'}>${ok?`Tasdiqlayman: ${R.p}ga ${R.qty} dona`:'Yetishmagan maydonni tanlang'}</button><div class="hint" style="text-align:center">Tasdiqdan keyingina topshirish yoziladi va tikuvchiga qabul soʻrovi boradi.</div></div>`;
+  }
+  return `<h3>Gapirib berish</h3>
+  <div class="mic-off"><span class="m">🎙</span><p>NAMUNA. Mikrofon va ovozni matnga aylantirish hali ulanmagan. Pastda gap matn koʻrinishida, tizim uni qanday ajratishini koʻrasiz.</p></div>
+  <div class="field"><div class="lbl"><span>Aytilgan gap (matn)</span><span>tahrirlash mumkin</span></div><textarea class="txt" id="vtext">${s.text}</textarea>
+  <div class="chips" style="margin-top:8px"><button class="chip" data-a="vsample" data-i="0">Toʻliq gap</button><button class="chip" data-a="vsample" data-i="1">Kimga yoʻq</button><button class="chip" data-a="vsample" data-i="2">Mos partiya yoʻq</button></div></div>
+  <button class="btn dark" data-a="vparse">Ajratib koʻrish</button>${out}`;
+}
+const VS=['Ruxshonaga tikish uchun 10 ta qizil paxta koʻylak berdim','8 ta qizil koʻylak berdim','Malikaga 5 ta oq shtapel yubka berdim'];
+function shRecv(s){
+  const h=S.handoffs.find(x=>x.id===s.h), b=B(h.b), d=s.count-h.qty;
+  return `<h3>Sanab qabul qilish</h3><p class="lead">${CUTTER} <b>${h.qty} dona</b> ${label(b)} berdi. Qoʻlingizda sanab koʻring.</p>
+  <div class="field"><div class="lbl">Men sanadim</div>${stepper('count',s.count,h.qty+20)}</div>
+  ${d?`<div class="warn-box">Farq ${d>0?'+':''}${d} dona. Son majburan tenglashtirilmaydi: ${s.count} dona qabul qilinadi, farq alohida tafovut boʻlib rahbarga koʻrinadi.</div>`:''}
+  <div class="foot"><button class="btn ${d?'dark':'ok'}" data-a="doRecv">${d?`${s.count} dona qabul qilaman`:`${h.qty} ta, toʻgʻri. Qabul qildim`}</button></div>`;
+}
+function shReady(s){
+  const hd=H(s.b,S.sewer), max=s.type==='rework'?hd.rework:hd.inHand, left=max-s.qty;
+  return `<h3>${s.type==='rework'?'Tuzatilganini topshirish':'Tayyorini topshirish'}</h3><p class="lead">${label(B(s.b))} · ${s.b}</p>
+  <div class="field"><div class="lbl"><span>Nechtasi tayyor</span><span>qoʻlingizda ${max}</span></div>${stepper('qty',s.qty,max)}</div>
+  <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:center">
+    <div><div class="bignum num" style="color:var(--c-await)">${s.qty}</div><div class="sub">tekshiruvga</div></div>
+    <div><div class="bignum num" style="color:var(--c-hand)">${left}</div><div class="sub">${s.type==='rework'?'tuzatishda':'chala qoladi'}</div></div></div>
+  <div class="hint">Bu «tayyor» degani. Pul tekshiruvchi qabul qilgandan keyin yoziladi.${s.type==='rework'?' Tuzatilgan mahsulot yangi dona boʻlib sanalmaydi.':''}</div>
+  <div class="foot"><button class="btn" data-a="doReady">${s.qty} dona tekshiruvga</button></div>`;
+}
+const RET=['Chok qiyshiq','Dogʻ bor','Oʻlcham xato','Ip chiqib turibdi'], DEF=['Mato yirtiq','Kesim xato','Tuzatib boʻlmaydi'];
+function shCheck(s){
+  const c=S.claims.find(x=>x.id===s.c), b=B(c.b), acc=c.qty-s.ret-s.def-s.miss;
+  const line=(k,n,col,sub)=>`<div class="chk-row" style="--c:${col}"><span class="sw"></span><div class="grow"><b>${n}</b><div class="sub">${sub}</div></div><div class="mini-step"><button data-a="cinc" data-k="${k}" data-d="-1" aria-label="kamaytirish">−</button><output>${s[k]}</output><button data-a="cinc" data-k="${k}" data-d="1" aria-label="koʻpaytirish" ${acc<=0?'disabled':''}>+</button></div></div>`;
+  const needR=s.ret>0&&!s.reason, needD=s.def>0&&!s.defReason;
+  return `<h3>${c.p} · ${c.qty} dona tayyor dedi</h3><p class="lead">${label(b)} · ${c.b}. Jismonan sanang, sifatini koʻring.</p>
+  <div class="card" style="text-align:center;padding:16px"><div class="bignum num" style="font-size:44px;color:var(--c-acc)">${acc}</div><div class="sub">qabul qilinadi · ${c.p}ga ${fmt(acc*TARIFF[b.model])} soʻm <span class="tag demo">namuna tarif</span></div></div>
+  <div class="field">${line('ret','Qaytarish','var(--c-rework)','Tuzatishga, sabab bilan')}${s.ret?`<div style="margin:8px 0 6px">${chips('reason',RET,s.reason)}</div>`:''}
+  ${line('def','Brak','var(--c-def)','Alohida chiqim')}${s.def?`<div style="margin:8px 0 6px">${chips('defReason',DEF,s.defReason)}</div>`:''}
+  ${line('miss','Sanoqda yoʻq','var(--c-gap)','Tafovut boʻlib yoziladi')}</div>
+  <div class="hint">Jami: ${acc} + ${s.ret} + ${s.def} + ${s.miss} = ${c.qty}. Bu topshiriq bir marta tasdiqlanadi, qayta qabul qilib boʻlmaydi.</div>
+  <div class="foot"><button class="btn ok" data-a="doCheck" ${needR||needD?'disabled':''}>${needR||needD?'Sababni tanlang':`Tasdiqlayman`}</button></div>`;
+}
+function shGap(s){
+  const g=S.gaps.find(x=>x.id===s.g);
+  return `<h3>Tafovut: ${g.p} · ${g.diff>0?'+':''}${g.diff} dona</h3><p class="lead">${g.where} · ${g.b}. Sonlar oʻzgarmaydi, faqat sabab va tasdiq yoziladi.</p>
+  <div class="field"><div class="lbl">Sabab</div>${chips('reason',['Sanoqda xato boʻlgan','Yoʻqolgan','Boshqa partiyaga aralashgan','Tekshirilmoqda'],s.reason)}</div>
+  <div class="foot"><button class="btn dark" data-a="doGap" ${s.reason?'':'disabled'}>Sabab bilan tasdiqlash</button></div>`;
+}
+function shAlgo(){
+  return `<div class="algo"><h3>Ish algoritmi</h3>
+  <ol>
+    <li><b>Bichuvchi</b> partiya ochadi: model, mato, rang, razmer, soni (dona). Mato sarfi alohida, metrda.</li>
+    <li><b>Bichuvchi</b> tikuvchiga beradi (tugma yoki ovoz). Bichuvdagi qoldiqdan ortiq berib boʻlmaydi. Ish «yoʻlda» turadi.</li>
+    <li><b>Tikuvchi</b> sanab qabul qiladi. Son farq qilsa, farq tafovut boʻlib alohida yoziladi.</li>
+    <li><b>Tikuvchi</b> «tayyor» deydi, qoʻlidagi chaladan ortiq emas. Tayyor ish «tekshiruvda», qolgani «chala» boʻlib alohida turadi.</li>
+    <li><b>Tekshiruvchi</b> sanaydi va qabul qiladi, qaytaradi (sabab bilan), brak yoki «topilmadi» deydi. Har topshiriq bir marta tasdiqlanadi.</li>
+    <li><b>Ish haqi</b> faqat qabul qilingan dona × tarif. Qaytarilgan ish tuzatilib qabul qilinsa ham bir marta hisoblanadi.</li>
+    <li><b>Rahbar</b> umumiy holat va oy tenglamasini koʻradi, istalgan sonni bosib kim, qachon, qaysi partiyadan kelganini ochadi. Tafovutga sabab yozib tasdiqlaydi.</li>
+  </ol>
+  <h4>Oy tenglamasi</h4>
+  <p>Oy boshidagi qoldiq + yangi bichilgan = yakuniy qoldiq + tekshirilib topshirilgan tayyor + brak + tafovut. Ichki topshirishlar kirim emas.</p>
+  <h4>Namunada ishlaydi</h4>
+  <ul><li>Barcha tugmalar va 4 rol ekrani</li><li>Sanoq cheklovlari: ortiq berish, ortiq «tayyor» deyish, ikki marta qabul qilish yoʻq</li><li>Chala, tekshiruvda, qayta ishlash, brak, tafovut alohida</li><li>Namuna tarif bilan ish haqi, oy tenglamasi, har sonning tarixi</li><li>Yozilgan gapni oddiy qoidalar bilan maydonlarga ajratish</li></ul>
+  <h4>Hali faqat namuna</h4>
+  <ul><li>Mikrofon va ovozni matnga aylantirish yoʻq</li><li>Telegram ulanishi, kirish tekshiruvi, rollar serverda emas</li><li>Baza yoʻq: sahifa yangilansa, hammasi boshidan boshlanadi</li><li>Katalog (model, mato, xodimlar) va tariflar sinov uchun</li><li>Yozuvni bekor qilish/tuzatish tarixi keyingi bosqichda (oʻchirish umuman yoʻq)</li></ul>
+  </div><div class="foot"><button class="btn ghost" data-a="close">Yopish</button></div>`;
+}
+
+/* ---------- events ---------- */
+const A={
+  role:d=>{S.role=d.r;S.ownerBatch=S.ownerPerson=null;render();scrollTo(0,0)},
+  sewer:d=>{S.sewer=d.p;render()},
+  algo:()=>openSheet({type:'algo'}),
+  close:closeSheet,
+  reset:()=>{seed();closeSheet();render();toast('Namuna boshidan boshlandi')},
+  go:d=>{const st=scen()[+d.i];S.role=st.role;if(st.role==='sewer')S.sewer='Ruxshona';S.ownerTab='sum';S.ownerBatch=S.ownerPerson=null;render();scrollTo(0,0);if(st.open)A.open({s:st.open});},
+  open:d=>{
+    const t=d.s;
+    if(t==='newBatch') openSheet({type:t,model:'Koʻylak',fabric:'Qizil paxta',size:'44',qty:100,meters:''});
+    if(t==='give') openSheet({type:t,bid:(S.batches.find(b=>b.stock>0)||{}).id,p:'Ruxshona',qty:10});
+    if(t==='voice') openSheet({type:t,text:VS[0],parsed:null});
+    if(t==='receive'){const h=S.handoffs.find(x=>x.id===+d.h);openSheet({type:t,h:h.id,count:h.qty})}
+    if(t==='ready'){const hd=H(d.b,S.sewer);openSheet({type:t,b:d.b,qty:(S.sewer==='Ruxshona'&&hd.inHand===10&&!S.claims.some(c=>c.p==='Ruxshona'))?8:hd.inHand})}
+    if(t==='rework'){openSheet({type:t,b:d.b,qty:H(d.b,S.sewer).rework})}
+    if(t==='check') openSheet({type:t,c:+d.c,ret:0,def:0,miss:0,reason:'',defReason:''});
+    if(t==='gapfix') openSheet({type:t,g:+d.g,reason:''});
+  },
+  set:d=>{SH[d.k]=d.num?+d.v:d.v; if(d.k==='fabric'||d.k==='qty'){} renderSheet()},
+  inc:d=>{SH[d.k]=Math.max(1,SH[d.k]+ +d.d);renderSheet()},
+  cinc:d=>{const c=S.claims.find(x=>x.id===SH.c);const acc=c.qty-SH.ret-SH.def-SH.miss;const nv=SH[d.k]+ +d.d;if(nv<0||(+d.d>0&&acc<=0))return;SH[d.k]=nv;renderSheet()},
+  doNew:()=>{const id=openBatch({...SH,meters:parseFloat(String(SH.meters).replace(',','.'))||0});closeSheet();render();toast(`${id} ochildi · ${B(id).cut} dona bichuvda`)},
+  doGive:()=>{if(issue(SH.bid,SH.p,SH.qty)){const p=SH.p,q=SH.qty;closeSheet();render();toast(`${p}ga ${q} dona berildi · qabul kutilmoqda`)}},
+  vsample:d=>{SH.text=VS[+d.i];SH.parsed=null;SH.bid=null;SH.p=null;SH.qty=null;renderSheet()},
+  vparse:()=>{SH.text=$('#vtext').value;SH.parsed=parse(SH.text);SH.bid=null;SH.p=null;SH.qty=null;renderSheet()},
+  doVoice:()=>{const R=voiceResolve(SH);if(R&&R.b&&issue(R.b.id,R.p,R.qty,'ovoz orqali (namuna)')){closeSheet();render();toast(`${R.p}ga ${R.qty} dona berildi · qabul kutilmoqda`)}},
+  doRecv:()=>{receive(SH.h,SH.count);closeSheet();render();toast('Qabul qilindi')},
+  doReady:()=>{if(ready(SH.b,S.sewer,SH.qty,SH.type==='rework')){const q=SH.qty;closeSheet();render();toast(`${q} dona tekshiruvga ketdi`)}},
+  doCheck:()=>{check(SH.c,SH);closeSheet();render();toast('Tasdiqlandi')},
+  doGap:()=>{const g=S.gaps.find(x=>x.id===SH.g);g.status='done';g.reason=SH.reason;log({who:'Rahbar',act:'fix',qty:0,b:g.b,p:g.p,txt:`Tafovut (${g.diff}) sababi: ${SH.reason}`});closeSheet();render()},
+  otab:d=>{S.ownerTab=d.t;S.ownerBatch=S.ownerPerson=null;render()},
+  obatch:d=>{S.ownerBatch=d.b;render();scrollTo(0,0)},
+  operson:d=>{S.ownerPerson=d.p;render();scrollTo(0,0)},
+  oback:()=>{S.ownerBatch=S.ownerPerson=null;render()}
+};
+document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(!el)return;const f=A[el.dataset.a];if(f){e.preventDefault();f(el.dataset)}});
+document.addEventListener('input',e=>{if(e.target.id==='meters'&&SH){SH.meters=e.target.value;const v=parseFloat(String(SH.meters).replace(',','.'))||0;const btn=document.querySelector('[data-a="doNew"]');const bad=v>S.fabricM[SH.fabric];if(btn)btn.disabled=bad;}
+  if(e.target.id==='vtext'&&SH)SH.text=e.target.value;});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&SH)closeSheet()});
+render();
+</script>
+
+<script>
+/* Telegram ichida ochilganda: to'liq ekran, mavzu rangi Telegramga mos */
+(function(){
+  var tg=window.Telegram&&Telegram.WebApp; if(!tg||!tg.initData)return;
+  try{
+    tg.ready(); tg.expand();
+    var setTheme=function(){document.documentElement.setAttribute('data-theme',tg.colorScheme==='dark'?'dark':'light');
+      var c=getComputedStyle(document.documentElement);
+      try{tg.setHeaderColor(c.getPropertyValue('--card').trim()||'#FFFFFF');tg.setBackgroundColor(c.getPropertyValue('--paper').trim()||'#EDF0F4');}catch(e){}};
+    setTheme(); tg.onEvent('themeChanged',setTheme);
+  }catch(e){}
+})();
+</script>
+</body>
+</html>
