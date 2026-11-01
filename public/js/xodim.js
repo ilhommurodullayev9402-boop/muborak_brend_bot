@@ -2,8 +2,9 @@
 import {
   api, act, esc, fmt, show, refresh, registerScreens, on, state, setLang, brandTop, openSheet, closeSheet, sheetErr, toast, $, $$,
   qty, val, num, pressed, chips, tape, STATE_NAMES, ava, periodPicker, periodFromBtn, periodRange, dmy, hm, dt, mins, today,
-  getLocation, openLocationSettings, biometric, errText, ApiError, tg,
+  getLocation, openLocationSettings, biometric, errText, ApiError, tg, pickPhoto, photoTag, canRecord, recordStart, recordStop, isRecording, voiceTag,
 } from './core.js';
+import { initOrders } from './buyurtma.js';
 
 const L = 'lat';
 let ROLE = 'tikuvchi';
@@ -13,12 +14,13 @@ const RN = { bichuvchi: 'Bichuvchi', tikuvchi: 'Tikuvchi' };
 const KIND = { cut_ready: 'Tayyor bichim', cut_partial: 'Chala bichim', partial_done: 'Chala bichim tugatildi', opening: 'Boshlang‘ich qoldiq',
   transfer_reserve: 'Berildi (qabul kutilmoqda)', transfer_accept: 'Sanab qabul qilindi', transfer_release: 'Bekor qilindi / qaytdi', submit: 'Tayyor deb topshirildi',
   accept: 'Tekshirib qabul qilindi', rework: 'Qayta ishlashga qaytdi', writeoff: 'Hisobdan chiqarildi' };
-const TK_ST = { submitted: ['Yuborilgan', ''], review: ['Rahbar tekshiruvida', 'blue'], employee: ['Sizning tasdig‘ingizda', 'warn'], agreed: ['Ikki tomon tasdiqlagan', 'ok'], disputed: ['Bahsli', 'bad'], cancelled: ['Bekor qilingan', ''] };
+const TK_ST = { priced: ['Narx qo‘yildi', 'blue'], submitted: ['Narx kutilmoqda', ''], review: ['Rahbar tekshiruvida', 'blue'], employee: ['Sizning tasdig‘ingizda', 'warn'], agreed: ['Ikki tomon tasdiqlagan', 'ok'], disputed: ['Bahsli', 'bad'], cancelled: ['Bekor qilingan', ''] };
 const TK_KIND = { product: 'Tayyor mahsulot', material: 'Material', service: 'Tikish xizmati' };
 const METHOD = { prepaid: 'Avval/alohida to‘langan', debt: 'Hali qarz', payroll: 'Oylik bilan hisoblashish' };
 const PAY_ST = { pending: ['Sizning tasdig‘ingiz kutilmoqda', 'warn'], confirmed: ['Tasdiqlangan', 'ok'], disputed: ['Tafovut yozilgan', 'bad'], cancelled: ['Bekor qilingan', ''], reverse_pending: ['Bekor qilish so‘ralgan', 'warn'], reversed: ['Bekor qilingan', ''] };
 const TR_ST = { pending: ['Qabul kutilmoqda', 'blue'], accepted: ['Qabul qildi', 'ok'], disputed: ['Aniqlashtirish so‘raldi', 'bad'], cancelled: ['Bekor qilingan', ''], resolved: ['Rahbar hal qildi', 'ok'] };
 const tag = ([t, c]) => `<span class="tag ${c}">${esc(t)}</span>`;
+const gl = (g) => (g.zakaz ? 'Buyurtma (zakaz)' : `${esc(g.type_name)} «${esc(g.model)}»`);
 const prodLabel = (x) => `${esc(x.type_name || '')} «${esc(x.model)}» · ${esc(x.material)} · ${esc(x.color)}`;
 
 export async function start(role) {
@@ -26,6 +28,7 @@ export async function start(role) {
   setLang(L);
   document.getElementById('nav').hidden = true;
   ME = await api('me');
+  initOrders(top, role);
   await show('w_home', {}, { root: true });
 }
 
@@ -33,6 +36,7 @@ function top(sub) { brandTop(sub || RN[ROLE], `${ME.first_name} ${ME.last_name}`
 
 // ---------- Davomat kartasi ----------
 async function attCard() {
+  if (ME.remote) return `<div class="card"><div class="att"><div class="grow"><div class="title">🏠 Siz uydan ishlaysiz</div><div class="sub">«Ishga keldim» belgilash shart emas. Ishni olganda va topshirganda ilovada qayd eting.</div></div></div></div>`;
   const a = await api('att_today');
   cache.att = a;
   const r = a.row;
@@ -54,6 +58,7 @@ async function attCard() {
 const ATT_REASON = {
   geo_not_set: () => 'Rahbar korxona joylashuvini hali sozlamagan.',
   loc_off: () => 'Joylashuv o‘chiq yoki Telegram’ga ruxsat berilmagan.',
+  loc_timeout: () => 'Telefon joylashuvni aniqlay olmadi. Telefon sozlamalarida joylashuv (GPS) yoqilganini va Telegram’ga ruxsat berilganini tekshiring.',
   low_accuracy: (p) => `Joylashuv aniqligi yetarli emas${p.acc ? ` (±${p.acc} m)` : ''}. Kerak: ±${p.max} m. Ochiqroq joyda qayta urinib ko‘ring.`,
   outside: (p) => `Siz korxona hududidan tashqaridasiz: ${p.dist} m (ruxsat ${p.radius} m).`,
   bio_none: () => 'Bu telefonda Face ID / barmoq izi yo‘q yoki Telegram’da yoqilmagan.',
@@ -61,23 +66,26 @@ const ATT_REASON = {
   bio_failed: () => 'Biometrik tasdiq o‘tmadi.',
   bio_token: () => 'Bu telefon hisobingizga ulanmagan (yangi telefon bo‘lishi mumkin).',
   no_in: () => 'Avval «Ishga keldim»ni belgilang.',
+  remote: () => 'Siz uydan ishlaysiz, davomat belgilash shart emas.',
 };
 
 async function doAtt(kind, el, force) {
   const a = cache.att || (await api('att_today'));
-  toast('Joylashuv tekshirilmoqda…');
+  openSheet('<h3>Tekshirilmoqda…</h3><p class="lead">Joylashuv aniqlanmoqda. Telegram ruxsat so‘rasa, «Ruxsat berish»ni bosing. Bu 30 soniyagacha davom etishi mumkin.</p>');
   const loc = await getLocation();
+  closeSheet();
   let bio = { bio: 'skip' };
   if (a.require_bio) bio = await biometric('Davomatni tasdiqlash', async () => (await act('bio_enroll')).token, force);
-  const r = await act('att_mark', { kind, loc: loc.error ? null : loc, bio: bio.bio, bio_token: bio.token }, el);
-  if (!r) return;
+  const r0 = await act('att_mark', { kind, loc: loc.error ? null : loc, bio: bio.bio, bio_token: bio.token }, el);
+  if (!r0) return;
+  const r = !r0.ok && r0.reason === 'loc_off' && loc.error === 'loc_timeout' ? { ...r0, reason: 'loc_timeout' } : r0;
   if (r.ok) { toast(r.already ? `Allaqachon belgilangan: ${r.at}` : `${kind === 'in' ? 'Kelish' : 'Ketish'} qayd etildi: ${r.at}`); closeSheet(); return refresh(); }
   const why = (ATT_REASON[r.reason] || (() => 'Tasdiqlab bo‘lmadi.'))(r.params || {});
   openSheet(`<h3>Avtomatik tasdiqlanmadi</h3><p class="lead">${esc(why)}</p>
     <div class="stack">
       <button class="btn dark" data-act="att" data-k="${kind}">Qayta urinish</button>
       ${r.reason === 'bio_token' ? `<button class="btn ghost" data-act="attForce" data-k="${kind}">Bu telefonni hisobimga ulash</button>` : ''}
-      ${r.reason === 'loc_off' && loc.canSettings ? '<button class="btn ghost" data-act="locSettings">Joylashuv ruxsatini ochish</button>' : ''}
+      ${(r.reason === 'loc_off' || r.reason === 'loc_timeout') && loc.canSettings ? '<button class="btn ghost" data-act="locSettings">Joylashuv ruxsatini ochish</button>' : ''}
     </div>
     <h2>Yoki rahbarga so‘rov</h2>
     <div class="field"><textarea class="txt" name="note" maxlength="300" placeholder="Izoh (ixtiyoriy): masalan, telefonimda barmoq izi yo‘q"></textarea></div>
@@ -88,28 +96,38 @@ async function doAtt(kind, el, force) {
 // ---------- Bosh ekran ----------
 async function home() {
   top();
-  const [att, money] = await Promise.all([attCard(), api('my_money')]);
+  const [att, money, mj] = await Promise.all([attCard(), api('my_money'), api('mj_my')]);
+  // Javob kelgan, hali ko'rilmagan murojaatlar (oxirgi 3 kun)
+  const mjN = mj.filter((a) => a.status !== 'open' && a.status !== 'cancelled' && a.answered_at && Date.now() - Date.parse(a.answered_at) < 3 * 86400000).length;
+  const leaveNow = mj.find((a) => a.status === 'approved' && a.from_day <= today() && a.to_day >= today());
   cache.money = money;
-  const todo = money.payments.length + money.adjustments.length + money.takeaways.length;
+  const todo = money.payments.length + money.adjustments.length + money.takeaways.length + (money.rk ? 1 : 0);
   const moneyBanner = todo ? `<button class="banner warn tap" data-act="go" data-s="w_money" style="margin-top:12px;width:100%">💵 Sizdan tasdiq kutilmoqda: ${todo} ta yozuv. Ochish ›</button>` : '';
   const tiles = `<h2>Hisob</h2><div class="grid2">
     <button class="big" data-act="go" data-s="w_money"><span class="ic">💵</span><span>Mening hisobim<small>Haq va pul</small></span>${todo ? `<span class="cnt">${todo}</span>` : ''}</button>
-    <button class="big" data-act="go" data-s="w_tk"><span class="ic">🧾</span><span>Korxonadan olganlarim<small>${money.declaration ? (money.declaration === 'none' ? 'Bu oy: olmaganman' : 'Bu oy: yozilgan') : 'Bu oy: javob yo‘q'}</small></span></button>
-    <button class="big" data-act="go" data-s="w_att"><span class="ic">🕘</span><span>Davomat tarixi</span></button>
+    <button class="big" data-act="go" data-s="w_tk"><span class="ic">🧾</span><span>Olganlarim<small>Olgan zahoti yozing</small></span></button>
+    <button class="big" data-act="avans"><span class="ic">💸</span><span>Avans so‘rash<small>${money.avans ? 'So‘rov: ' + fmt(money.avans.amount) + ' so‘m' : 'Rahbarga so‘rov'}</small></span></button>
+    ${ME.remote ? '' : '<button class="big" data-act="go" data-s="w_att"><span class="ic">🕘</span><span>Davomat tarixi</span></button>'}
+    <button class="big" data-act="go" data-s="w_mj"><span class="ic">📨</span><span>Murojaat<small>Ruxsat so‘rash, muammo</small></span>${mjN ? `<span class="cnt">${mjN}</span>` : ''}</button>
     <button class="big" data-act="go" data-s="w_moves"><span class="ic">📜</span><span>Ish tarixi</span></button>
     ${ME.canInspect ? '<button class="big" data-act="go" data-s="w_insp"><span class="ic">✔︎</span><span>Tekshirish<small>Maxsus vakolat</small></span></button>' : ''}
   </div>`;
-  if (ROLE === 'bichuvchi') return att + moneyBanner + (await cutterHome()) + tiles;
-  return att + moneyBanner + (await sewerHome()) + tiles;
+  const leaveB = leaveNow ? `<div class="banner ok" style="margin-top:12px">✅ Sizga ${dmy(leaveNow.from_day)} — ${dmy(leaveNow.to_day)} ruxsat berilgan.</div>` : '';
+  if (ROLE === 'bichuvchi') return leaveB + att + moneyBanner + (await cutterHome()) + tiles;
+  return leaveB + att + moneyBanner + (await sewerHome()) + tiles;
 }
 
 async function cutterHome() {
   const h = await api('cut_home');
   cache.cut = h;
   const bs = h.batches;
+  const od = await api('ord_list', {});
+  const late = od.rows.filter((o) => o.overdue || (o.days_left <= 2 && o.status !== 'ready')).length;
+  const waitMe = od.rows.filter((o) => o.status === 'sewn').length;
   return `<h2>Bichuv</h2>
   <div class="stack">
     <button class="big primary" data-act="cut"><span class="ic">✂︎</span><span>Bichdim<small>Tayyor va chala bichimni kiritish</small></span></button>
+    <button class="big" data-act="go" data-s="o_list"><span class="ic">📐</span><span>Buyurtmalar (zakaz)<small>${od.rows.length ? `${od.rows.length} ta jarayonda${late ? ` · <b style="color:var(--bad)">${late} tasining muddati yaqin</b>` : ''}${waitMe ? ` · ${waitMe} ta qabul kutmoqda` : ''}` : 'Mijozdan alohida buyurtma'}</small></span>${late + waitMe ? `<span class="cnt">${late + waitMe}</span>` : ''}</button>
     <div class="grid2">
       <button class="big" data-act="give"><span class="ic">➜</span><span>Tikuvchiga berish<small>Kimga, nechta</small></span></button>
       <button class="big" data-act="voice"><span class="ic">🎙</span><span>Gapirib berish<small>Ovoz yoki matn</small></span></button>
@@ -123,7 +141,7 @@ async function cutterHome() {
   </div>
   <h2>Partiyalar</h2>
   ${bs.length ? bs.map((b) => `<button class="card tap" data-act="go" data-s="w_batch" data-id="${b.id}">
-      <div class="row"><div class="grow"><div class="title">${prodLabel(b)}</div><div class="mono">${esc(b.code)} · ${dmy(b.day)} · ${b.lines.map((l) => esc(l.size)).join(', ')}</div></div>
+      <div class="row">${photoTag(b.photo_id)}<div class="grow"><div class="title">${prodLabel(b)}</div><div class="mono">${esc(b.code)} · ${dmy(b.day)} · ${b.lines.map((l) => esc(l.size)).join(', ')}</div></div>
       <div class="bignum num">${fmt(b.totals.free || 0)}<small>erkin</small></div></div>
       ${b.totals.partial ? `<div class="sub" style="margin-top:4px">Chala bichim: <b>${fmt(b.totals.partial)}</b> (tarqatilmaydi)</div>` : ''}
       ${tape(b.totals, L)}</button>`).join('') : '<div class="empty">Hali partiya yo‘q. «Bichdim» bilan boshlang.</div>'}
@@ -138,10 +156,15 @@ async function cutterHome() {
 async function sewerHome() {
   const h = await api('sew_home');
   cache.sew = h;
-  return `<h2>Kelgan ishlar</h2>
+  const od = await api('ord_list', {});
+  const oNew = od.rows.filter((o) => o.status === 'given').length;
+  const oWork = od.rows.filter((o) => ['sewing', 'fixing'].includes(o.status)).length;
+  const ordTile = `<h2>Buyurtma ko‘ylaklar</h2><button class="big ${oNew ? 'primary' : ''}" data-act="go" data-s="o_list" style="width:100%"><span class="ic">📐</span><span>Buyurtma ko‘ylaklar<small>${od.rows.length ? `${oNew ? `${oNew} ta yangi, qabul qiling · ` : ''}${oWork} ta qo‘limda (topshirilmagan)` : 'Hozircha yo‘q'}</small></span>${oNew ? `<span class="cnt">${oNew}</span>` : ''}</button>`;
+  return `${ordTile}<h2>Kelgan ishlar</h2>
   ${h.incoming.length ? h.incoming.map((t) => `<div class="card">
       <div class="row">${ava(t.from_name, t.from_id, 36)}<div class="grow"><div class="title">${fmt(t.total)} dona · ${esc(t.from_name)}dan</div><div class="mono">${esc(t.code)} · ${dmy(t.day)} ${t.time}</div></div></div>
-      <div class="list" style="margin-top:10px;box-shadow:none;background:var(--soft)">${t.items.map((i) => `<div class="li"><div class="grow">${prodLabel(i)}<div class="mono">${esc(i.code)} · razmer ${esc(i.size)}</div></div><div class="r">${fmt(i.qty)} dona</div></div>`).join('')}</div>
+      <div class="list" style="margin-top:10px;box-shadow:none;background:var(--soft)">${t.items.map((i) => `<div class="li">${photoTag(i.photo_id)}<div class="grow">${prodLabel(i)}<div class="mono">${esc(i.code)} · razmer ${esc(i.size)}</div></div><div class="r">${fmt(i.qty)} dona</div></div>`).join('')}</div>
+      ${t.note ? `<div class="banner" style="margin-top:10px">📝 ${esc(t.note)}</div>` : ''}${voiceTag(t.voice_id)}
       ${t.status === 'disputed' ? `<div class="banner bad" style="margin-top:10px">Aniqlashtirish so‘ralgan: ${esc(t.dispute_note)}. Rahbar yoki bichuvchi javobini kuting.</div>`
         : `<div class="actions"><button class="btn ok" data-act="trAccept" data-id="${t.id}">Sanadim, qabul qildim</button><button class="btn ghost" data-act="trDispute" data-id="${t.id}">Soni mos emas — tafovut bor</button></div>`}
     </div>`).join('') : '<div class="empty">Yangi kelgan ish yo‘q.</div>'}
@@ -152,7 +175,7 @@ async function sewerHome() {
     <div class="stat" style="--c:var(--c-accepted)"><b class="num">${fmt(h.totals.accepted_month)}</b><span>Bu oy qabul qilingan</span></div>
   </div>
   ${h.lines.length ? h.lines.map((l) => `<div class="card">
-      <div class="title">${prodLabel(l)}</div><div class="mono">${esc(l.code)} · razmer ${esc(l.size)}</div>
+      <div class="row">${photoTag(l.photo_id)}<div class="grow"><div class="title">${prodLabel(l)}</div><div class="mono">${esc(l.code)} · razmer ${esc(l.size)}</div></div></div>
       <div class="bal" style="margin-top:10px">
         <span>Qo‘limda (tikilmoqda)</span><span class="v">${fmt(l.sewing)}</span>
         ${l.rework ? `<span>Qayta ishlashga qaytgan</span><span class="v" style="color:var(--c-rework)">${fmt(l.rework)}</span>` : ''}
@@ -188,7 +211,11 @@ async function cutSheet(batchId) {
       <div id="sizes">${b ? b.lines.map((l) => sizeRow(l.size)).join('') : sizeRow()}</div>
       <button class="link" data-act="addSize">+ Razmer qo‘shish</button>
       <p class="hint">Chala bichim alohida hisoblanadi va tugatilmaguncha tikuvchiga berilmaydi.</p></div>
+    <div class="field"><div class="lbl">Mahsulot rasmi <span>ixtiyoriy</span></div>
+      <div class="phbtn"><span id="cutPh">${b && b.photo_id ? photoTag(b.photo_id) : ''}</span><button class="btn ghost" data-act="cutPhoto" style="flex:1">📷 Rasm olish</button></div>
+      <p class="hint">Tikuvchi ishni olganda qaysi model ekanini rasmdan ko‘radi.</p></div>
     <div class="foot"><div class="sub" id="cutTot" style="margin-bottom:8px"></div><button class="btn dark" data-act="cutSave">Saqlash</button></div>`);
+  cache.cutPhoto = null;
   const upd = () => {
     const rows = $$('#sizes .szrow');
     const r = rows.reduce((a, x) => a + (Number(x.querySelector('[name=ready]').value) || 0), 0), p = rows.reduce((a, x) => a + (Number(x.querySelector('[name=partial]').value) || 0), 0);
@@ -201,6 +228,7 @@ async function cutSheet(batchId) {
 
 // ---------- Tikuvchiga berish ----------
 async function giveSheet(pre = {}) {
+  cache.voiceId = null; cache.vSec = 'izoh'; cache.vWhat = 'Tikuvchiga izoh';
   const meta = cache.meta || (cache.meta = await api('prod_meta'));
   const lines = [];
   for (const b of (cache.cut || (await api('cut_home'))).batches) for (const l of b.lines) if ((l.states.free || 0) > 0) lines.push({ ...l, b });
@@ -209,11 +237,21 @@ async function giveSheet(pre = {}) {
   openSheet(`<h3>Tikuvchiga berish</h3>
     <div class="field"><div class="lbl">Kimga</div>${chips('to', meta.sewers.map((s) => [s.id, s.name]), pre.to || '')}</div>
     <div class="field"><div class="lbl"><span>Partiya va razmer</span><span>erkin qoldiq</span></div>
-      ${lines.map((l) => `<div class="card" style="padding:12px"><div class="row"><div class="grow"><b>${prodLabel(l.b)}</b><div class="mono">${esc(l.b.code)} · razmer ${esc(l.size)} · erkin ${fmt(l.states.free)}</div></div></div>
+      ${lines.map((l) => `<div class="card" style="padding:12px"><div class="row">${photoTag(l.b.photo_id)}<div class="grow"><b>${prodLabel(l.b)}</b><div class="mono">${esc(l.b.code)} · razmer ${esc(l.size)} · erkin ${fmt(l.states.free)}</div></div></div>
         <div style="margin-top:8px" data-line="${l.line_id}">${qty('q' + l.line_id, pre.line === l.line_id ? pre.qty : 0, l.states.free)}</div></div>`).join('')}</div>
-    <div class="field"><div class="lbl">Izoh</div><input class="txt" name="note" maxlength="300" placeholder="ixtiyoriy"></div>
+    <div class="field"><div class="lbl">Izoh <span>ixtiyoriy</span></div><textarea class="txt" name="note" maxlength="300" placeholder="Qanday tikish kerak: masalan, yoqasi ikki qavat, cho‘ntagi yo‘q"></textarea>
+      ${canRecord() ? `<div id="vBox" style="margin-top:8px"><button class="btn ghost" data-act="vRec" id="vRecBtn">🎙 Ovozli izoh yozish</button></div>`
+        : '<p class="hint">Ovoz bilan aytish uchun izoh maydoniga bosib, klaviaturadagi 🎤 tugmasidan foydalaning, telefon gapingizni yozuvga aylantiradi.</p>'}</div>
     <div class="foot"><button class="btn dark" data-act="giveSave" data-via="${pre.via || 'manual'}">Berish</button>
     <p class="hint">Yuborilgach miqdor band qilinadi va tikuvchi sanab «Qabul qildim»ni bosguncha boshqa odamga berilmaydi.</p></div>`);
+}
+
+async function stopVoice() {
+  const b = $('#vRecBtn'); if (b) { b.disabled = true; b.textContent = 'Saqlanmoqda…'; }
+  const v = await recordStop(cache.vWhat || 'Tikuvchiga izoh', cache.vSec || 'izoh');
+  if (!v) { if (b) { b.disabled = false; b.classList.remove('rec'); b.textContent = '🎙 Ovozli izoh yozish'; } return; }
+  cache.voiceId = v.id;
+  $('#vBox').innerHTML = `${voiceTag(v.id)}<button class="link" data-act="vDel">Ovozni o‘chirish</button>`;
 }
 
 // ---------- Ovoz ----------
@@ -281,6 +319,7 @@ async function batchScreen({ id }) {
   const S = STATE_NAMES[L];
   return `<button class="back" data-act="back">‹ Orqaga</button>
   <h1 class="page">${prodLabel(b)}</h1><div class="mono">${esc(b.code)} · ${dmy(b.day)}${b.cutter ? ' · ' + esc(b.cutter) : ''}</div>
+  ${photoTag(b.photo_id, 'ph lg')}
   ${tape(b.totals, L)}
   <h2>Razmerlar <button data-act="cut" data-id="${b.id}">+ Bichim qo‘shish</button></h2>
   <div class="card scrollx"><table class="t"><tr><th>Razmer</th><th>Tayyor jami</th><th>Erkin</th><th>Chala</th><th>Tikuvchilarda</th><th>Qabul</th></tr>
@@ -297,7 +336,19 @@ let moneyP = null;
 async function moneyScreen() {
   top('Mening hisobim');
   moneyP = moneyP || { key: 'month', ...periodRange('month') };
-  const [m, ps] = await Promise.all([api('my_money'), api('payslip', { from: moneyP.from, to: moneyP.to })]);
+  const [m, ps, cur] = await Promise.all([api('my_money'), api('payslip', { from: moneyP.from, to: moneyP.to }), api('rk_view', {})]);
+  const sent = m.rk ? (m.rk.period === cur.live.period ? cur.rk : (await api('rk_view', { period: m.rk.period })).rk) : null;
+  const rkHtml = sent && sent.status === 'sent'
+    ? `<div class="card" style="border:2px solid var(--warn)"><div class="title">${sent.period} oyi hisobi — rahbar yubordi</div><div class="sub">Tekshirib ko‘ring. Tasdiqlasangiz, olganlaringiz oylikdan ushlanadi va qolgan pul beriladi.</div>
+        ${rkTable(sent.data)}
+        <div class="actions row2"><button class="btn ok" data-act="rkOk" data-id="${sent.id}">Tasdiqlayman</button><button class="btn ghost" data-act="rkNo" data-id="${sent.id}">Tafovut bor</button></div></div>`
+    : `<div class="card"><div class="title">Shu oy hozircha (${cur.live.period})</div><div class="sub">Oy oxirida rahbar hisobni yuboradi, siz tasdiqlaysiz.</div>
+        ${rkTable(cur.live)}
+        ${cur.live.unpriced.length ? `<div class="banner warn" style="margin-top:8px">${cur.live.unpriced.length} ta olganingizga hali narx qo‘yilmagan.</div>` : ''}</div>`;
+  const avHtml = m.avans
+    ? `<div class="card"><div class="row"><div class="grow"><div class="title">Avans so‘rovingiz: ${fmt(m.avans.amount)} so‘m</div><div class="sub">Rahbar javobini kutyapti${m.avans.note ? ' · «' + esc(m.avans.note) + '»' : ''}</div></div></div>
+        <div class="actions"><button class="btn ghost" data-act="avCancel" data-id="${m.avans.id}">So‘rovni bekor qilish</button></div></div>`
+    : `<button class="big" data-act="avans" style="width:100%"><span class="ic">💸</span><span>Avans so‘rash<small>Summani yozing, rahbarga boradi</small></span></button>`;
   const pays = m.payments.map((p) => `<div class="card"><div class="row"><div class="grow"><div class="title">${fmt(p.amount)} so‘m</div>
       <div class="sub">${p.status === 'reverse_pending' ? 'Rahbar bu to‘lovni bekor qilishni so‘radi: ' + esc(p.reverse_reason) : `Rahbar sizga naqd ${p.kind === 'avans' ? 'avans' : 'pul'} berganini qayd etdi`}</div>
       <div class="mono">${esc(p.code)} · ${dmy(p.day)}${p.period_from ? ` · davr ${dmy(p.period_from)}—${dmy(p.period_to)}` : ''}</div></div></div>
@@ -311,6 +362,9 @@ async function moneyScreen() {
   const W = { bichish: 'Bichish', tikish: 'Tikish' };
   return `<button class="back" data-act="back">‹ Orqaga</button>
   ${pays || adjs || tks ? `<h2>Sizning tasdig‘ingiz kerak</h2>${pays}${adjs}${tks}` : ''}
+  <h2>Oylik hisobim</h2>
+  ${rkHtml}
+  <div style="margin-top:10px">${avHtml}</div>
   <h2>Hozirgi holat</h2>
   <div class="stats">
     <div class="stat" style="--c:var(--ok)"><b class="num">${fmt(ps.now.payable)}</b><span>Beriladigan pul, so‘m</span></div>
@@ -320,7 +374,7 @@ async function moneyScreen() {
   <h2>Oylik varaqasi</h2>
   ${periodPicker(L, moneyP, 'mPer')}
   <div class="card" style="margin-top:10px">
-    ${ps.groups.length ? `<table class="t"><tr><th>Ish</th><th>Dona</th><th>Tarif</th><th>Summa</th></tr>${ps.groups.map((g) => `<tr><td>${W[g.work]}: ${esc(g.type_name)} «${esc(g.model)}»</td><td>${fmt(g.qty)}</td><td>${g.price == null ? '<span class="tag warn">yo‘q</span>' : fmt(g.price)}</td><td>${g.amount == null ? '—' : fmt(g.amount)}</td></tr>`).join('')}</table>`
+    ${ps.groups.length ? `<table class="t"><tr><th>Ish</th><th>Dona</th><th>Tarif</th><th>Summa</th></tr>${ps.groups.map((g) => `<tr><td>${W[g.work]}: ${gl(g)}</td><td>${fmt(g.qty)}</td><td>${g.price == null ? '<span class="tag warn">yo‘q</span>' : fmt(g.price)}</td><td>${g.amount == null ? '—' : fmt(g.amount)}</td></tr>`).join('')}</table>`
       : '<div class="sub">Bu davrda qabul qilingan ish yo‘q.</div>'}
     ${ps.missingQty ? `<div class="banner warn" style="margin-top:8px">${fmt(ps.missingQty)} dona uchun tarif hali belgilanmagan. Summa taxmin qilinmaydi, rahbar belgilagach qo‘shiladi.</div>` : ''}
     <div class="bal" style="margin-top:12px">
@@ -328,7 +382,7 @@ async function moneyScreen() {
       <span>Hisoblangan ishbay haq</span><span class="v">+${fmt(ps.earned)}</span>
       ${ps.adjConfirmed ? `<span>Tuzatishlar</span><span class="v">${ps.adjConfirmed > 0 ? '+' : '−'}${fmt(Math.abs(ps.adjConfirmed))}</span>` : ''}
       <span>Olgan pulingiz (tasdiqlangan)</span><span class="v">−${fmt(ps.paidConfirmed)}</span>
-      <span>Korxonadan olganlar (kelishilgan)</span><span class="v">−${fmt(ps.ded)}</span>
+      <span>Ushlab qolingan (olganlar, mijoz puli)</span><span class="v">−${fmt(ps.ded)}</span>
       <span class="hr"></span><span class="tot">Davr oxiri qoldiq</span><span class="v tot">${fmt(ps.closing)} so‘m</span>
     </div>
     ${ps.closed ? '<div class="banner ok" style="margin-top:10px">Bu davr yopilgan.</div>' : ''}
@@ -345,22 +399,48 @@ function tkConfirmCard(k) {
 }
 
 async function tkScreen() {
-  top('Korxonadan olganlarim');
-  const [list, m] = await Promise.all([api('tk_list'), api('my_money')]);
-  const ask = !m.declaration;
+  top('Olganlarim');
+  const list = await api('tk_list');
+  cache.tkPhoto = null;
+  const open = list.filter((k) => ['submitted', 'review', 'priced', 'disputed', 'employee'].includes(k.status));
+  const fin = list.filter((k) => k.status === 'agreed').slice(0, 40);
+  const row = (k) => `<div class="li">${photoTag(k.photo_id)}<div class="grow"><b>${esc(k.name)}</b>
+      <div class="sub">${dmy(k.day)}${k.amount != null ? ` · <b>${fmt(k.amount)} so‘m</b>` : ''}${k.pay_method === 'prepaid' ? ' · pul alohida to‘langan' : ''}</div></div>
+      <div style="text-align:right">${tag(TK_ST[k.status] || [k.status, ''])}${['submitted', 'review'].includes(k.status) ? `<br><button class="link" data-act="tkCancel" data-id="${k.id}">O‘chirish</button>` : ''}</div></div>`;
   return `<button class="back" data-act="back">‹ Orqaga</button>
-  <h1 class="page">Korxonadan olganlarim</h1>
-  ${ask ? `<div class="card"><div class="title">Shu oyda korxonadan mahsulot, material yoki xizmat olganmisiz?</div>
-    <div class="actions row2"><button class="btn ghost" data-act="declNone">Olmaganman</button><button class="btn dark" data-act="tkAdd">Ma’lumot qo‘shish</button></div></div>`
-    : `<button class="big primary" data-act="tkAdd"><span class="ic">＋</span><span>Ma’lumot qo‘shish<small>Mahsulot, material yoki tikish xizmati</small></span></button>
-       ${m.declaration === 'none' ? '<p class="hint">Bu oy uchun «Olmaganman» deb javob bergansiz. Keyin olsangiz, qo‘shing.</p>' : ''}`}
-  ${m.takeaways.length ? `<h2>Tasdiqlang</h2>${m.takeaways.map(tkConfirmCard).join('')}` : ''}
-  <h2>Yozuvlar</h2>
-  ${list.length ? `<div class="list">${list.map((k) => `<div class="li"><div class="grow"><b>${esc(k.name)}</b> · ${k.qty} ${esc(k.unit || '')}
-      <div class="sub">${dmy(k.day)} · ${TK_KIND[k.kind]}${k.amount != null ? ` · ${fmt(k.amount)} so‘m` : k.proposed ? ` · taklif ${fmt(k.proposed)} so‘m` : ' · narxni rahbar belgilaydi'}${k.pay_method ? ' · ' + METHOD[k.pay_method] : ''}${k.remaining ? ` · qolgan ${fmt(k.remaining)}` : ''}</div></div>
-      <div style="text-align:right">${tag(TK_ST[k.status])}${['submitted', 'review'].includes(k.status) ? `<br><button class="link" data-act="tkCancel" data-id="${k.id}">Bekor qilish</button>` : ''}</div></div>`).join('')}</div>`
-    : '<div class="empty">Yozuv yo‘q.</div>'}`;
+  <h1 class="page">Olganlarim</h1>
+  <p class="lead">Korxonadan nima olsangiz, shu zahoti yozib qo‘ying, oy oxirida esdan chiqmaydi. Narxini rahbar qo‘yadi, oylik hisobda ko‘rasiz.</p>
+  <div class="card">
+    <div class="field"><div class="lbl">Nima oldingiz?</div><input class="txt" name="tkname" id="tkname" maxlength="120" placeholder="masalan: 3 metr pombaxt" enterkeyhint="done"></div>
+    <div class="phbtn"><span id="tkPh"></span><button class="btn ghost" data-act="tkPhoto" style="flex:1">📷 Rasm (ixtiyoriy)</button></div>
+    <button class="btn dark" style="margin-top:10px" data-act="tkAddNew">+ Ro‘yxatga qo‘shish</button>
+  </div>
+  <h2>Oylik hisobga kirmagan · ${open.length}</h2>
+  ${open.length ? `<div class="list">${open.map(row).join('')}</div>` : '<div class="empty">Hozircha yozuv yo‘q.</div>'}
+  ${fin.length ? `<h2>Hisobga kiritilganlar</h2><div class="list">${fin.map(row).join('')}</div>` : ''}`;
 }
+
+// Oylik hisob jadvali (xodim ko'radigan ko'rinish)
+function rkTable(d) {
+  const sg = (n) => (n < 0 ? '−' : '') + fmt(Math.abs(n));
+  return `<div class="bal">
+    ${d.opening ? `<span>O‘tgan davrdan ${d.opening > 0 ? 'qoldiq' : 'qarz'}</span><span class="v">${sg(d.opening)}</span>` : ''}
+    <span>Qilgan ishlarim</span><span class="v">+${fmt(d.earned)}</span>
+    ${d.adj ? `<span>Tuzatishlar</span><span class="v">${d.adj > 0 ? '+' : ''}${sg(d.adj)}</span>` : ''}
+    <span>Olgan avanslarim</span><span class="v">−${fmt(d.avansSum)}</span>
+    ${d.givenSum ? `<span>Berilgan pul</span><span class="v">−${fmt(d.givenSum)}</span>` : ''}
+    ${d.prevDed ? `<span>Avval ushlangan</span><span class="v">−${fmt(d.prevDed)}</span>` : ''}
+    <span>Korxonadan olganlarim</span><span class="v">−${fmt(d.itemsSum)}</span>
+    ${d.cashHeld ? `<span>Qo‘limdagi mijoz puli (topshirilmagan)</span><span class="v">−${fmt(d.cashHeld)}</span>` : ''}
+    <span class="hr"></span><span class="tot">${d.total >= 0 ? 'Qo‘limga tegadi' : 'Qarzim (keyingi oyga o‘tadi)'}</span><span class="v tot">${fmt(Math.abs(d.total))} so‘m</span>
+  </div>
+  ${d.items.length ? `<details style="margin-top:10px"><summary>Olganlarim ro‘yxati · ${d.items.length} ta</summary><div class="list" style="margin-top:8px">${d.items.map((k) => `<div class="li">${photoTag(k.photo_id)}<div class="grow">${esc(k.name)}<div class="sub">${dmy(k.day)}</div></div><div class="r">${fmt(k.amount)}</div></div>`).join('')}</div></details>` : ''}
+  ${d.avans.length ? `<details style="margin-top:6px"><summary>Avanslar · ${d.avans.length} ta</summary><div class="list" style="margin-top:8px">${d.avans.map((p) => `<div class="li"><div class="grow">${dmy(p.day)}<div class="sub">${esc(p.code)}</div></div><div class="r">${fmt(p.amount)}</div></div>`).join('')}</div></details>` : ''}
+  ${d.groups.length ? `<details style="margin-top:6px"><summary>Qilgan ishlarim</summary><table class="t" style="margin-top:8px"><tr><th>Ish</th><th>Dona</th><th>Summa</th></tr>${d.groups.map((g) => `<tr><td>${g.work === 'bichish' ? 'Bichish' : 'Tikish'}: ${gl(g)}</td><td>${fmt(g.qty)}</td><td>${g.amount == null ? '—' : fmt(g.amount)}</td></tr>`).join('')}</table></details>` : ''}`;
+}
+
+const RK_WHY = { cash_open: 'rahbarga topshirgan pulingiz hali tasdiqlanmagan', missing_rate: 'ba’zi ishlarga tarif qo‘yilmagan', unpriced: 'ba’zi olganlaringizga hali narx qo‘yilmagan', payment_open: 'tasdiqlanmagan to‘lov bor',
+  adjustment_open: 'tasdiqlanmagan tuzatish bor', takeaway_open: 'bahsli yozuv bor' };
 
 let attP = null;
 async function attScreen() {
@@ -386,11 +466,29 @@ async function inspScreen() {
   const list = await api('insp_list');
   cache.insp = list;
   return `<button class="back" data-act="back">‹ Orqaga</button><h1 class="page">Tekshirish</h1><p class="lead">Tayyor deb yuborilgan mahsulotni sanab, qabul qiling yoki sababi bilan qaytaring.</p>
-  ${list.length ? list.map((s) => `<div class="card"><div class="row">${ava(s.name, s.sewer_id, 36)}<div class="grow"><div class="title">${esc(s.name)} · ${fmt(s.open_qty)} dona</div><div class="sub">${prodLabel(s)} · ${esc(s.code)} · ${esc(s.size)}</div></div></div>
+  ${list.length ? list.map((s) => `<div class="card"><div class="row">${photoTag(s.photo_id) || ava(s.name, s.sewer_id, 36)}<div class="grow"><div class="title">${esc(s.name)} · ${fmt(s.open_qty)} dona</div><div class="sub">${prodLabel(s)} · ${esc(s.code)} · ${esc(s.size)}</div></div></div>
     <div class="actions">${s.own ? '<div class="sub">O‘zingizning ishingiz — boshqa tekshiruvchi qabul qiladi.</div>' : `<button class="btn dark" data-act="inspOpen" data-id="${s.id}">Tekshirish</button>`}</div></div>`).join('') : '<div class="empty">Tekshiruv kutayotgan mahsulot yo‘q.</div>'}`;
 }
 
-registerScreens({ w_home: home, w_batch: batchScreen, w_money: moneyScreen, w_tk: tkScreen, w_att: attScreen, w_moves: movesScreen, w_insp: inspScreen });
+const MJ_K = { leave: 'Ruxsat so‘rash', cut_error: 'Bichimdagi xato', shortage: 'Kamomad (yetishmaydi)', conflict: 'Xodim bilan kelishmovchilik', equipment: 'Uskuna yoki mato', other: 'Boshqa' };
+const MJ_ST = { open: ['Rahbarda', 'blue'], answered: ['Javob berildi', 'ok'], approved: ['Ruxsat berildi', 'ok'], declined: ['Ruxsat berilmadi', 'bad'], cancelled: ['Bekor qilingan', ''] };
+async function mjScreen() {
+  top('Murojaat');
+  const list = await api('mj_my');
+  return `<button class="back" data-act="back">‹ Orqaga</button>
+  <h1 class="page">Murojaat</h1>
+  <p class="lead">Rahbarga to‘g‘ridan-to‘g‘ri yozing: ruxsat so‘rash, bichimdagi xato, kamomad, kelishmovchilik. Murojaatingizni faqat rahbar ko‘radi.</p>
+  <div class="grid2"><button class="big primary" data-act="mjNew" data-k="leave"><span class="ic">🙋</span><span>Ruxsat so‘rash<small>Kela olmaydigan kunlar</small></span></button>
+  <button class="big" data-act="mjNew" data-k="cut_error"><span class="ic">📨</span><span>Muammo yozish<small>Xato, kamomad va boshqa</small></span></button></div>
+  <h2>Murojaatlarim</h2>
+  ${list.length ? list.map((a) => `<div class="card"><div class="row"><div class="grow"><div class="title">${MJ_K[a.kind]}${a.ref ? ' · ' + esc(a.ref) : ''}</div>
+    <div class="sub">${dt(a.created_at)}${a.from_day ? ` · <b>${dmy(a.from_day)}${a.to_day !== a.from_day ? ' — ' + dmy(a.to_day) : ''}</b> (${a.days} kun)` : ''}</div></div>${tag(MJ_ST[a.status])}</div>
+    ${a.text ? `<div class="sub" style="margin-top:6px">«${esc(a.text)}»</div>` : ''}${a.photo_id ? `<div style="margin-top:6px">${photoTag(a.photo_id)}</div>` : ''}${voiceTag(a.voice_id)}
+    ${a.answer ? `<div class="banner ${a.status === 'declined' ? 'bad' : 'ok'}" style="margin-top:8px">Rahbar: «${esc(a.answer)}»</div>` : ''}
+    ${a.status === 'open' ? `<div class="actions"><button class="link" data-act="mjCancel" data-id="${a.id}">Bekor qilish</button></div>` : ''}</div>`).join('') : '<div class="empty">Hali murojaat yo‘q.</div>'}`;
+}
+
+registerScreens({ w_mj: mjScreen, w_home: home, w_batch: batchScreen, w_money: moneyScreen, w_tk: tkScreen, w_att: attScreen, w_moves: movesScreen, w_insp: inspScreen });
 
 // ---------- Tugmalar ----------
 const done = async (msg) => { closeSheet(); toast(msg); await refresh(); };
@@ -403,6 +501,46 @@ on({
   cut: (el) => cutSheet(el.dataset.id),
   addSize: () => $('#sizes').insertAdjacentHTML('beforeend', sizeRow()),
   rmSize: (el) => { if ($$('#sizes .szrow').length > 1) el.closest('.szrow').remove(); },
+  tkPhoto: async () => {
+    const p = await pickPhoto(val('tkname', document) || '', 'olganlar');
+    if (p) { cache.tkPhoto = p.id; $('#tkPh').innerHTML = photoTag(p.id); }
+  },
+  tkAddNew: async (el) => {
+    const name = val('tkname', document);
+    if (!name || name.length < 2) { toast('Nima olganingizni yozing', true); return; }
+    const r = await act('tk_add', { name, photo_id: cache.tkPhoto || undefined }, el);
+    if (!r) return;
+    toast('Ro‘yxatga qo‘shildi');
+    await refresh();
+    const i = $('#tkname'); if (i) i.focus();
+  },
+  avans: () => openSheet(`<h3>Avans so‘rash</h3><p class="lead">So‘rov rahbarga boradi. Rahbar bersa, ilovada «Pulni oldim» ni bosasiz. Avans oylik hisobda ayiriladi.</p>
+    <div class="field"><div class="lbl">Summa, so‘m</div><input class="txt" name="avamount" type="number" inputmode="numeric" min="1000" step="1000" placeholder="500000" autofocus></div>
+    <div class="field"><div class="lbl">Izoh <span>ixtiyoriy</span></div><input class="txt" name="avnote" maxlength="200" placeholder="masalan: uy uchun kerak"></div>
+    <div class="foot"><button class="btn dark" data-act="avSave">Yuborish</button></div>`),
+  avSave: async (el) => {
+    if (!(num('avamount') >= 1000)) return sheetErr('Summani yozing (kamida 1 000 so‘m).');
+    await act('av_request', { amount: num('avamount'), note: val('avnote') }, el);
+    await done('Rahbarga yuborildi');
+  },
+  avCancel: async (el) => { await act('av_cancel', { id: Number(el.dataset.id) }, el); await done('Bekor qilindi'); },
+  rkOk: async (el) => {
+    const r = await act('rk_answer', { id: Number(el.dataset.id), agree: true }, el);
+    if (r && r.stale) { toast('Hisob yuborilgandan keyin o‘zgargan. Rahbar yangisini yuboradi.', true); return refresh(); }
+    if (r) await done('Tasdiqlandi. Rahbar qolgan pulni beradi.');
+  },
+  rkNo: (el) => openSheet(`<h3>Tafovut bor</h3><p class="lead">Nima noto‘g‘ri ekanini yozing. Rahbar ko‘rib, hisobni tuzatib qayta yuboradi.</p>
+    <div class="field"><textarea class="txt" name="rknote" maxlength="300" placeholder="masalan: 2 ta zamok olganman, 3 ta emas" autofocus></textarea></div>
+    <div class="foot"><button class="btn dark" data-act="rkNoSave" data-id="${el.dataset.id}">Yuborish</button></div>`),
+  rkNoSave: async (el) => {
+    if (!val('rknote')) return sheetErr('Nima noto‘g‘ri ekanini yozing.');
+    await act('rk_answer', { id: Number(el.dataset.id), agree: false, note: val('rknote') }, el);
+    await done('Rahbarga yuborildi');
+  },
+  cutPhoto: async () => {
+    const p = await pickPhoto(val('model') || '', 'bichim');
+    if (p) { cache.cutPhoto = p.id; $('#cutPh').innerHTML = photoTag(p.id); toast('Rasm biriktirildi'); }
+  },
   cutSave: async (el) => {
     const lines = $$('#sizes .szrow').map((r) => ({ size: r.querySelector('[name=size]').value.trim(), ready: Number(r.querySelector('[name=ready]').value) || 0, partial: Number(r.querySelector('[name=partial]').value) || 0 }))
       .filter((l) => l.size || l.ready || l.partial);
@@ -410,9 +548,10 @@ on({
     if (!lines.some((l) => l.ready + l.partial > 0)) return sheetErr('Kamida bitta son kiriting.');
     const bsel = pressed('batch');
     let r;
-    if (bsel && bsel !== 'new') r = await act('cut_add', { batch_id: Number(bsel), lines }, el);
+    const photo_id = cache.cutPhoto || undefined;
+    if (bsel && bsel !== 'new') r = await act('cut_add', { batch_id: Number(bsel), lines, photo_id }, el);
     else {
-      const body = { type_id: Number(pressed('type')), model: val('model'), material: val('material'), color: val('color'), lines };
+      const body = { type_id: Number(pressed('type')), model: val('model'), material: val('material'), color: val('color'), lines, photo_id };
       if (!body.type_id) return sheetErr('Mahsulot turini tanlang.');
       if (!body.model || !body.material || !body.color) return sheetErr('Model, material va rangni yozing — partiyalar adashmasligi uchun.');
       r = await act('batch_create', body, el);
@@ -423,12 +562,53 @@ on({
     <div class="field">${qty('n', Number(el.dataset.max), el.dataset.max, 1)}</div><div class="foot"><button class="btn dark" data-act="partialSave" data-id="${el.dataset.id}">Saqlash</button></div>`),
   partialSave: async (el) => { await act('partial_done', { line_id: Number(el.dataset.id), qty: num('n') }, el); await done('Tayyor bichimga o‘tkazildi'); },
   give: () => giveSheet(),
+  mjNew: async (el) => {
+    cache.voiceId = null; cache.mjPhoto = null; cache.vSec = 'murojaat'; cache.vWhat = 'Murojaat';
+    const leave = el.dataset.k === 'leave';
+    const meta = leave ? { refs: [] } : await api('mj_meta');
+    const t0 = today();
+    openSheet(`<h3>${leave ? 'Ruxsat so‘rash' : 'Rahbarga murojaat'}</h3>
+      ${leave ? `<div class="row2"><div class="field"><div class="lbl">Qaysi kundan</div><input class="txt" type="date" name="from" min="${t0}" value="${t0}"></div>
+        <div class="field"><div class="lbl">Qaysi kungacha</div><input class="txt" type="date" name="to" min="${t0}" value="${t0}"></div></div>
+        <p class="hint">Bir kun bo‘lsa, ikkalasiga bir xil sana qo‘ying.</p>`
+      : `<div class="field"><div class="lbl">Mavzu</div>${chips('kind', Object.entries(MJ_K).filter(([k]) => k !== 'leave'), 'cut_error')}</div>
+        ${meta.refs.length ? `<div class="field"><div class="lbl">Qaysi ishga tegishli <span>ixtiyoriy</span></div>${chips('ref', meta.refs, '')}</div>` : ''}`}
+      <div class="field"><div class="lbl">${leave ? 'Sababi' : 'Nima bo‘ldi'}</div><textarea class="txt" name="text" maxlength="1000" placeholder="${leave ? 'masalan: to‘yga boraman' : 'masalan: 10 tadan 1 tasida yeng yo‘q'}"></textarea>
+        ${canRecord() ? '<div id="vBox" style="margin-top:8px"><button class="btn ghost" data-act="vRec" id="vRecBtn">🎙 Ovoz bilan aytish</button></div>' : '<p class="hint">Ovoz bilan aytish uchun maydonga bosib, klaviaturadagi 🎤 tugmasidan foydalaning.</p>'}</div>
+      ${leave ? '' : '<div class="field"><div class="phbtn"><span id="mjPh"></span><button class="btn ghost" data-act="mjPhoto" style="flex:1">📷 Rasm (ixtiyoriy)</button></div></div>'}
+      <div class="foot"><button class="btn dark" data-act="mjSave" data-k="${leave ? 'leave' : ''}">Rahbarga yuborish</button></div>`);
+  },
+  mjPhoto: async () => { const p = await pickPhoto('Murojaat', 'murojaat'); if (p) { cache.mjPhoto = p.id; $('#mjPh').innerHTML = photoTag(p.id); } },
+  mjSave: async (el) => {
+    const leave = el.dataset.k === 'leave';
+    if (isRecording()) await stopVoice();
+    if (!val('text') && !cache.voiceId) return sheetErr('Yozing yoki ovoz bilan ayting.');
+    const b = { kind: leave ? 'leave' : pressed('kind'), text: val('text'), voice_id: cache.voiceId || undefined };
+    if (leave) {
+      if (!val('from') || val('from') < today()) return sheetErr('Sanani tanlang.');
+      if (val('to') < val('from')) return sheetErr('Tugash sanasi boshlanishidan oldin bo‘lmasin.');
+      Object.assign(b, { from_day: val('from'), to_day: val('to') || val('from') });
+    } else Object.assign(b, { ref: pressed('ref') || undefined, photo_id: cache.mjPhoto || undefined });
+    if (await act('mj_create', b, el)) await done('Rahbarga yuborildi. Javob kelsa, Telegram’da xabar olasiz.');
+  },
+  mjCancel: async (el) => { if (await act('mj_cancel', { id: Number(el.dataset.id) }, el)) await done('Bekor qilindi'); },
+  vRec: async () => {
+    if (isRecording()) return stopVoice();
+    const r = await recordStart();
+    if (r.error) {
+      $('#vBox').innerHTML = '<p class="hint">Telefon mikrofonga ruxsat bermadi. Izoh maydoniga bosib, klaviaturadagi 🎤 tugmasi bilan gapiring, telefon yozuvga aylantiradi.</p>';
+      return;
+    }
+    const b = $('#vRecBtn'); b.classList.add('rec'); b.textContent = '⏹ To‘xtatish (yozilmoqda…)';
+  },
+  vDel: () => { cache.voiceId = null; $('#vBox').innerHTML = '<button class="btn ghost" data-act="vRec" id="vRecBtn">🎙 Ovozli izoh yozish</button>'; },
   giveSave: async (el) => {
     const to = Number(pressed('to'));
     if (!to) return sheetErr('Tikuvchini tanlang.');
     const items = $$('#sheetBody [data-line]').map((d) => ({ line_id: Number(d.dataset.line), qty: Number(d.querySelector('input').value) || 0 })).filter((i) => i.qty > 0);
     if (!items.length) return sheetErr('Sonini kiriting.');
-    const r = await act('transfer_create', { to_id: to, items, note: val('note'), via: el.dataset.via }, el);
+    if (isRecording()) await stopVoice();
+    const r = await act('transfer_create', { to_id: to, items, note: val('note'), via: el.dataset.via, voice_id: cache.voiceId || undefined }, el);
     if (r) await done(`${r.code}: ${fmt(r.total)} dona berildi. Tikuvchi qabul qilishi kutilmoqda.`);
   },
   trCancel: (el) => openSheet(`<h3>Topshiriqni bekor qilish</h3><p class="lead">Band qilingan miqdor tarqatilmagan qoldiqqa qaytadi. Asl yozuv tarixda qoladi.</p>

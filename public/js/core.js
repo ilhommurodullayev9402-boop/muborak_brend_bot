@@ -52,9 +52,12 @@ const ERR = {
     bad_input: 'Maydonlarni tekshiring.', bad_state: 'Bu yozuv holati o‘zgargan. Sahifani yangilang.', not_found: 'Topilmadi.',
     not_enough: (p) => `Qoldiq yetarli emas: ${p.have} dona bor.`, not_enough_free: (p) => `Erkin qoldiq yetarli emas: ${p.have} dona bor.`,
     have_only: (p) => `Sizda ${p.have} dona bor. Miqdorni tekshiring.`, need_reason: 'Sababini yozing.', need_consent: 'Oylik bilan hisoblashishga roziligingizni belgilang.',
-    has_takeaways: 'Bu oyda yozuvlaringiz bor.', already_marked: 'Bu bugun allaqachon belgilangan.', not_rahbar: 'Bu bo‘lim faqat rahbar uchun.',
+    has_takeaways: 'Bu oyda yozuvlaringiz bor.', already_marked: 'Bu bugun allaqachon belgilangan.', remote_worker: 'Siz uydan ishlaysiz, davomat belgilash shart emas.', not_rahbar: 'Bu bo‘lim faqat rahbar uchun.',
     inactive: 'Kirish yopilgan.', dup_size: (p) => `${p.size} razmer ikki marta yozilgan.`, bad_sewer: 'Tikuvchini tanlang.', self_forbidden: 'O‘zingizning ishingizni o‘zingiz tekshira olmaysiz.',
     unknown_action: 'Noma’lum amal.',
+    overpay: (p) => `Mijozning qolgan qarzi ${fmt(p.left)} so‘m. Undan ko‘p yozib bo‘lmaydi.`, price_below_paid: (p) => `Mijoz allaqachon ${fmt(p.paid)} so‘m bergan. Narx undan kam bo‘lmaydi.`,
+    order_has_pay: 'Mijoz pul bergan. Bekor qilishni rahbar qiladi.', cash_too_much: (p) => `Qo‘lingizda ${fmt(p.held)} so‘m bor (topshirish kutilayotgani hisobga olingan).`,
+    cash_already_given: 'Bu pul rahbarga topshirilgan.', avans_pending: 'Avans so‘rovingiz hali javobsiz.',
   },
   cyr: {
     network: 'Интернет алоқаси йўқ. Қайта уриниб кўринг.', server: 'Сервер жавоб бермади. Бироздан кейин уриниб кўринг.',
@@ -70,6 +73,9 @@ const ERR = {
     owner_protected: 'Асосий раҳбарни фаолсизлантириб бўлмайди.', self_forbidden: 'Ўзингизга бу амални қила олмайсиз.', already_rahbar: 'Бу одам аллақачон раҳбар.',
     not_pending: 'Бу сўров аллақачон кўриб чиқилган.', no_in: 'Келиш қайд этилмаган.', dup_size: (p) => `${p.size} размер икки марта ёзилган.`,
     unknown_action: 'Номаълум амал.', not_rahbar: 'Бу бўлим фақат раҳбар учун.',
+    overpay: (p) => `Мижознинг қолган қарзи ${fmt(p.left)} сўм. Ундан кўп ёзиб бўлмайди.`, price_below_paid: (p) => `Мижоз аллақачон ${fmt(p.paid)} сўм берган. Нарх ундан кам бўлмайди.`,
+    order_has_pay: 'Мижоз пул берган.', cash_too_much: (p) => `Бичувчида ${fmt(p.held)} сўм бор.`,
+    cash_already_given: 'Бу пул бичувчидан аллақачон олинган. Аввал ўша ёзувни кўриб чиқинг.', bad_sewer: 'Тикувчини танланг.',
   },
 };
 export function errText(e, lang) {
@@ -242,27 +248,40 @@ export function periodFromBtn(el, cur) {
 
 // ---------- Telegram: joylashuv va biometrika ----------
 // Joylashuv faqat tugma bosilganda bir marta olinadi; doimiy kuzatuv yo'q.
-export function getLocation() {
+// Telegram ba’zi qurilmalarda javob bermay qolishi mumkin — tugma hech qachon “osilib” qolmasin.
+const within = (p, ms, fallback) => Promise.race([p, new Promise((r) => setTimeout(() => r(fallback), ms))]);
+// Avval Telegram LocationManager, javob bo‘lmasa brauzer orqali. Har bosqich vaqt bilan cheklangan.
+function viaTelegram() {
   return new Promise((resolve) => {
     const lm = tg && tg.LocationManager;
-    const viaBrowser = () => {
-      if (!navigator.geolocation) return resolve({ error: 'loc_off' });
-      navigator.geolocation.getCurrentPosition(
-        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }),
-        () => resolve({ error: 'loc_off' }), { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
-    };
-    if (lm && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0')) {
-      try {
-        lm.init(() => {
-          if (!lm.isLocationAvailable) return viaBrowser();
-          lm.getLocation((d) => {
-            if (!d) return resolve({ error: 'loc_off', canSettings: true });
-            resolve({ lat: d.latitude, lng: d.longitude, acc: d.horizontal_accuracy || 9999 });
-          });
+    if (!lm || !(tg.isVersionAtLeast && tg.isVersionAtLeast('8.0'))) return resolve(null);
+    try {
+      lm.init(() => {
+        if (!lm.isLocationAvailable) return resolve(null);
+        lm.getLocation((d) => {
+          if (!d) return resolve({ error: 'loc_off', canSettings: true });
+          resolve({ lat: d.latitude, lng: d.longitude, acc: d.horizontal_accuracy || 9999 });
         });
-      } catch { viaBrowser(); }
-    } else viaBrowser();
+      });
+    } catch { resolve(null); }
   });
+}
+function viaBrowser() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve({ error: 'loc_off' });
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }),
+      () => resolve({ error: 'loc_off' }), { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  });
+}
+export async function getLocation() {
+  // Telegram ruxsat oynasini ko‘rsatishi mumkin, shuning uchun unga ko‘proq vaqt beramiz.
+  const t = await within(viaTelegram(), 20000, { error: 'loc_timeout' });
+  if (t && !t.error) return t;
+  if (t && t.canSettings) return t;
+  const b = await within(viaBrowser(), 12000, { error: 'loc_timeout' });
+  if (!b.error) return b;
+  return t && t.error === 'loc_timeout' ? { error: 'loc_timeout', canSettings: !!(tg && tg.LocationManager) } : b;
 }
 export function openLocationSettings() { try { tg.LocationManager.openSettings(); } catch {} }
 
@@ -271,22 +290,138 @@ function bmInit() {
     const bm = tg && tg.BiometricManager;
     if (!bm || !(tg.isVersionAtLeast && tg.isVersionAtLeast('7.2'))) return res(null);
     try { bm.init(() => res(bm)); } catch { res(null); }
-  });
+  }).then((x) => x, () => null);
 }
 // Natija: { bio: 'ok'|'none'|'denied'|'failed', token? }
 export async function biometric(reason, enroll, force) {
-  const bm = await bmInit();
+  const bm = await within(bmInit(), 6000, null);
   if (!bm || !bm.isBiometricAvailable) return { bio: 'none' };
   if (!bm.isAccessGranted) {
-    const granted = await new Promise((r) => bm.requestAccess({ reason }, r));
+    const granted = await within(new Promise((r) => bm.requestAccess({ reason }, r)), 60000, false);
     if (!granted) return { bio: 'denied' };
   }
   if (!bm.isBiometricTokenSaved || force) {
     const token = await enroll();
-    const saved = await new Promise((r) => bm.updateBiometricToken(token, r));
+    const saved = await within(new Promise((r) => bm.updateBiometricToken(token, r)), 15000, false);
     if (!saved) return { bio: 'failed' };
   }
-  const [ok, token] = await new Promise((r) => bm.authenticate({ reason }, (a, b) => r([a, b])));
+  const [ok, token] = await within(new Promise((r) => bm.authenticate({ reason }, (a, b) => r([a, b]))), 60000, [false]);
   if (!ok || !token) return { bio: 'failed' };
   return { bio: 'ok', token };
 }
+
+// ---------- Rasmlar ----------
+// Rasm telefonda kichraytiriladi (eng uzun tomoni 1280 px, JPEG), keyin serverga yuboriladi.
+// Ko'rsatish: <img data-photo="id"> — kuzatuvchi o'zi yuklaydi (imzo sarlavhasi bilan), bosilsa katta ochiladi.
+const photoUrls = new Map();
+export function pickPhoto(what, sec) {
+  return new Promise((resolve) => {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0];
+      inp.remove();
+      if (!f) return resolve(null);
+      try {
+        const img = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = URL.createObjectURL(f); });
+        const k = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(img.src);
+        const data = c.toDataURL('image/jpeg', 0.8);
+        toast(state.lang === 'cyr' ? 'Расм юкланмоқда…' : 'Rasm yuklanmoqda…');
+        const r = await api('photo_upload', { data, what: what || '', sec: sec || '' });
+        const blob = await (await fetch(data)).blob();
+        photoUrls.set(String(r.id), URL.createObjectURL(blob));
+        resolve({ id: r.id, url: photoUrls.get(String(r.id)) });
+      } catch (e) {
+        toast(e instanceof ApiError ? errText(e) : 'Rasmni yuklab bo‘lmadi');
+        resolve(null);
+      }
+    }, { once: true });
+    inp.click();
+  });
+}
+export const photoTag = (id, cls = 'ph') => (id ? `<img class="${cls}" data-photo="${Number(id)}" alt="rasm">` : '');
+async function loadPhoto(img) {
+  const id = img.dataset.photo;
+  img.dataset.loading = '1';
+  try {
+    if (!photoUrls.has(id)) {
+      const r = await fetch('api/photo_get', { method: 'POST', headers: { 'content-type': 'application/json', 'x-init-data': initData }, body: JSON.stringify({ id: Number(id) }) });
+      if (!r.ok || !(r.headers.get('content-type') || '').startsWith('image/')) throw new Error('photo');
+      photoUrls.set(id, URL.createObjectURL(await r.blob()));
+    }
+    img.src = photoUrls.get(id);
+  } catch { img.classList.add('ph-bad'); }
+}
+new MutationObserver(() => {
+  for (const img of document.querySelectorAll('img[data-photo]:not([src]):not([data-loading])')) loadPhoto(img);
+}).observe(document.documentElement, { childList: true, subtree: true });
+document.addEventListener('click', (ev) => {
+  const img = ev.target.closest('img[data-photo]');
+  if (!img || !img.src) return;
+  ev.stopPropagation(); ev.preventDefault();
+  const box = document.createElement('div');
+  box.className = 'lightbox';
+  box.innerHTML = `<img src="${img.src}" alt="">`;
+  box.addEventListener('click', () => box.remove());
+  document.body.appendChild(box);
+}, true);
+
+// ---------- Ovozli izoh ----------
+// Telefon mikrofonidan yozish (MediaRecorder). Ba'zi telefonlarda Telegram ichida mikrofon ruxsati yo'q — unda null qaytadi.
+export const canRecord = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+let rec = null;
+export async function recordStart() {
+  if (!canRecord()) return { error: 'unsupported' };
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mime = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm'].find((m) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+    const mr = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 24000 } : undefined);
+    const chunks = [];
+    mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    mr.start();
+    const timer = setTimeout(() => { if (mr.state === 'recording') mr.stop(); }, 120000); // ko'pi bilan 2 daqiqa
+    rec = { mr, stream, chunks, timer, done: new Promise((r) => { mr.onstop = r; }) };
+    return { ok: true };
+  } catch { return { error: 'denied' }; }
+}
+export async function recordStop(what, sec) {
+  if (!rec) return null;
+  const r = rec; rec = null;
+  clearTimeout(r.timer);
+  if (r.mr.state === 'recording') r.mr.stop();
+  await r.done;
+  r.stream.getTracks().forEach((t) => t.stop());
+  const blob = new Blob(r.chunks, { type: (r.mr.mimeType || 'audio/webm').split(';')[0] });
+  if (blob.size < 500) return null;
+  const data = await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.readAsDataURL(blob); });
+  toast(state.lang === 'cyr' ? 'Овоз юкланмоқда…' : 'Ovoz yuklanmoqda…');
+  try {
+    const res = await api('voice_upload', { data, mime: blob.type, what: what || '', sec: sec || '' });
+    mediaUrls.set('v' + res.id, URL.createObjectURL(blob));
+    return { id: res.id };
+  } catch (e) { toast(e instanceof ApiError ? errText(e) : 'Ovozni yuklab bo‘lmadi'); return null; }
+}
+export const isRecording = () => !!rec;
+export const voiceTag = (id) => (id ? `<audio class="voice" data-voice="${Number(id)}" controls preload="none"></audio>` : '');
+const mediaUrls = new Map();
+async function loadVoice(el) {
+  const id = el.dataset.voice;
+  el.dataset.loading = '1';
+  try {
+    if (!mediaUrls.has('v' + id)) {
+      const r = await fetch('api/voice_get', { method: 'POST', headers: { 'content-type': 'application/json', 'x-init-data': initData }, body: JSON.stringify({ id: Number(id) }) });
+      if (!r.ok || !(r.headers.get('content-type') || '').startsWith('audio/')) throw new Error('voice');
+      mediaUrls.set('v' + id, URL.createObjectURL(await r.blob()));
+    }
+    el.src = mediaUrls.get('v' + id);
+  } catch { el.replaceWith(Object.assign(document.createElement('span'), { className: 'sub', textContent: 'Ovozni ochib bo‘lmadi' })); }
+}
+new MutationObserver(() => {
+  for (const a of document.querySelectorAll('audio[data-voice]:not([src]):not([data-loading])')) loadVoice(a);
+}).observe(document.documentElement, { childList: true, subtree: true });

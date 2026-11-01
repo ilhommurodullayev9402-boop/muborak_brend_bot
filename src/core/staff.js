@@ -1,4 +1,5 @@
 // Kirish, bir martalik ro'yxatdan o'tish, xodimlar, sozlamalar, katalog va tariflar.
+import { fillOrderRates } from './orders.js';
 import { AppError, needText, needInt, needDay, optText, fullName, addDays } from './base.js';
 
 const ROLES = ['rahbar', 'bichuvchi', 'tikuvchi'];
@@ -77,7 +78,7 @@ export const actions = {
     auth: 'active',
     fn(ctx) {
       const m = ctx.me;
-      return { id: m.id, role: m.role, first_name: m.first_name, last_name: m.last_name, canInspect: !!m.can_inspect || m.role === 'rahbar',
+      return { id: m.id, role: m.role, first_name: m.first_name, last_name: m.last_name, canInspect: !!m.can_inspect || m.role === 'rahbar', remote: !!m.remote,
         bio: !!m.bio_hash, day: ctx.day };
     },
   },
@@ -85,7 +86,7 @@ export const actions = {
   staff_list: {
     auth: 'rahbar',
     fn(ctx) {
-      const all = ctx.db.all('SELECT id,tg_id,first_name,last_name,birth_date,role,status,can_inspect,profile_done,created_at,decided_at,note FROM users ORDER BY status, first_name');
+      const all = ctx.db.all('SELECT id,tg_id,first_name,last_name,birth_date,role,status,can_inspect,remote,profile_done,created_at,decided_at,note FROM users ORDER BY status, first_name');
       const today = ctx.day;
       const bdays = [];
       for (const u of all) {
@@ -152,6 +153,21 @@ export const actions = {
       const on = b.on ? 1 : 0;
       ctx.db.run('UPDATE users SET can_inspect=? WHERE id=?', on, u.id);
       ctx.audit('inspect_right', 'user', u.id, { can_inspect: u.can_inspect }, { can_inspect: on });
+      return { ok: true };
+    },
+  },
+
+  // Uydan ishlaydigan xodim: davomat so‘ralmaydi, «kelmadi» deb hisoblanmaydi. Ish va pul jarayoni o‘zgarmaydi.
+  staff_remote: {
+    auth: 'rahbar', mut: true,
+    fn(ctx, b) {
+      const u = ctx.user(needInt(b.user_id, 'user_id', 1));
+      if (!u || u.status !== 'active' || u.role === 'rahbar') throw new AppError('not_found');
+      const on = b.on ? 1 : 0;
+      if (u.remote === on) return { ok: true };
+      ctx.db.run('UPDATE users SET remote=? WHERE id=?', on, u.id);
+      ctx.audit('remote_changed', 'user', u.id, { remote: u.remote }, { remote: on });
+      ctx.notify.push({ tg_id: u.tg_id, text: on ? 'Rahbar sizni «Uydan ishlaydi» deb belgiladi. Endi «Ishga keldim» belgilash shart emas.' : 'Rahbar sizni korxonada ishlaydigan qilib belgiladi. Har kuni «Ishga keldim» va «Ishdan ketdim»ni belgilang.' });
       return { ok: true };
     },
   },
@@ -246,7 +262,8 @@ export const actions = {
       const missing = ctx.db.one('SELECT COUNT(*) n, COALESCE(SUM(qty),0) q FROM earnings WHERE amount IS NULL');
       // Xodim faqat o'z ishiga tegishli tariflarni ko'radi
       const mine = ctx.me.role === 'rahbar' ? rows : rows.filter((r) => r.work === (ctx.me.role === 'bichuvchi' ? 'bichish' : 'tikish'));
-      return { rates: mine, missing: ctx.me.role === 'rahbar' ? missing : null };
+      const z = (k) => { const v = ctx.setting('zakaz_' + k); return v == null || v === '' ? null : Number(v); };
+      return { rates: mine, missing: ctx.me.role === 'rahbar' ? missing : null, zakaz: { bichish: z('bichish'), tikish: z('tikish') } };
     },
   },
 
@@ -272,7 +289,8 @@ export const actions = {
     auth: 'rahbar', mut: true,
     fn(ctx) {
       let filled = 0;
-      for (const e of ctx.db.all('SELECT * FROM earnings WHERE amount IS NULL')) {
+      filled += fillOrderRates(ctx);
+      for (const e of ctx.db.all('SELECT * FROM earnings WHERE amount IS NULL AND order_id IS NULL')) {
         const li = ctx.lineInfo(e.line_id);
         const r = ctx.findRate(e.work, li.type_id, li.model, e.day);
         if (!r) continue;

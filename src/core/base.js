@@ -93,7 +93,7 @@ export class Ctx {
     return r.id;
   }
   lineInfo(lineId) {
-    return this.db.one(`SELECT l.id line_id, l.size, b.id batch_id, b.code, b.model, b.material, b.color, b.type_id, b.cutter_id, b.opening,
+    return this.db.one(`SELECT l.id line_id, l.size, b.id batch_id, b.code, b.model, b.material, b.color, b.type_id, b.cutter_id, b.opening, b.photo_id,
       c.name type_name FROM lines l JOIN batches b ON b.id=l.batch_id LEFT JOIN catalog c ON c.id=b.type_id WHERE l.id=?`, lineId);
   }
   // Tarif: ish turi + mahsulot turi (+ model) + amal qilish sanasi. Topilmasa null — taxmin qilinmaydi.

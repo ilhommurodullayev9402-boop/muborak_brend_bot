@@ -1,5 +1,6 @@
 // Kelish-ketish davomati. Vaqt faqat serverdan olinadi. Joylashuv faqat tugma bosilganda tekshiriladi,
 // koordinatalar saqlanmaydi (faqat masofa natijasi).
+import { leaveDays } from './murojaat.js';
 import { AppError, needDay, needInt, optText, hmToMin, minOfDay, tHM, fullName } from './base.js';
 
 export function distanceM(lat1, lng1, lat2, lng2) {
@@ -63,6 +64,7 @@ export const actions = {
     fn(ctx, b) {
       const kind = b.kind;
       if (!['in', 'out'].includes(kind)) throw new AppError('bad_input', { field: 'kind' });
+      if (ctx.me.remote) return { ok: false, reason: 'remote' };
       const s = S(ctx);
       const row = ctx.db.one('SELECT * FROM attendance WHERE user_id=? AND day=?', ctx.me.id, ctx.day);
       if (kind === 'in' && row && row.in_at) return { ok: true, already: true, at: tHM(Date.parse(row.in_at)) };
@@ -97,6 +99,7 @@ export const actions = {
     auth: ['bichuvchi', 'tikuvchi'], mut: true,
     fn(ctx, b) {
       if (!['in', 'out'].includes(b.kind)) throw new AppError('bad_input', { field: 'kind' });
+      if (ctx.me.remote) throw new AppError('remote_worker');
       const reason = String(b.reason || 'other').slice(0, 40);
       const ex = ctx.db.one("SELECT id FROM att_exc WHERE user_id=? AND day=? AND kind=? AND status='pending'", ctx.me.id, ctx.day, b.kind);
       if (ex) return { id: ex.id, existed: true };
@@ -163,7 +166,7 @@ export const actions = {
     fn(ctx, b) {
       const from = needDay(b.from, 'from'), to = needDay(b.to, 'to');
       const s = S(ctx);
-      const users = ctx.db.all("SELECT id,first_name,last_name,role,status FROM users WHERE role IN('bichuvchi','tikuvchi') AND (status='active' OR status='inactive') ORDER BY first_name");
+      const users = ctx.db.all("SELECT id,first_name,last_name,role,status,remote FROM users WHERE role IN('bichuvchi','tikuvchi') AND (status='active' OR status='inactive') ORDER BY first_name");
       const rows = ctx.db.all('SELECT * FROM attendance WHERE day BETWEEN ? AND ?' + (b.user_id ? ' AND user_id=?' : ''), from, to, ...(b.user_id ? [Number(b.user_id)] : []));
       const by = {};
       for (const r of rows) (by[r.user_id] ||= []).push(metrics(r, s, ctx.day));
@@ -171,8 +174,9 @@ export const actions = {
       for (const u of users) {
         if (b.user_id && u.id !== Number(b.user_id)) continue;
         const days = (by[u.id] || []).sort((a, c) => (a.day < c.day ? 1 : -1));
-        if (!days.length && u.status === 'inactive') continue;
-        out.push({ id: u.id, name: fullName(u), role: u.role, status: u.status, days,
+        const leave = leaveDays(ctx, u.id, from, to);
+        if (!days.length && !leave && (u.status === 'inactive' || u.remote)) continue;
+        out.push({ id: u.id, name: fullName(u), role: u.role, status: u.status, days, leave,
           came: days.filter((d) => d.in).length, late: days.filter((d) => d.late > 0).length,
           no_out: days.filter((d) => d.status === 'no_out').length, full: days.filter((d) => d.full).length,
           net: days.reduce((a, d) => a + (d.net || 0), 0) });

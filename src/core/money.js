@@ -10,18 +10,20 @@ export function ledger(ctx, uid, uptoDay) {
   const earned = sum(ctx, 'SELECT SUM(amount) s FROM earnings WHERE user_id=? AND amount IS NOT NULL AND day<=?', uid, d);
   const adj = sum(ctx, "SELECT SUM(amount) s FROM adjustments WHERE user_id=? AND status='confirmed' AND day<=?", uid, d);
   const paid = sum(ctx, "SELECT SUM(amount) s FROM payments WHERE user_id=? AND status IN('confirmed','reverse_pending') AND day<=?", uid, d);
-  const ded = sum(ctx, "SELECT SUM(amount) s FROM settlements WHERE user_id=? AND how='payroll' AND day<=?", uid, d);
+  // Ushlanmalar: olganlar + topshirilmagan mijoz puli (buyurtmalar), oylik hisob tasdig'ida yoziladi
+  const ded = sum(ctx, "SELECT SUM(amount) s FROM settlements WHERE user_id=? AND how='payroll' AND day<=?", uid, d)
+    + sum(ctx, "SELECT SUM(amount) s FROM cash_handovers WHERE user_id=? AND how='payroll' AND status='confirmed' AND day<=?", uid, d);
   return { earned, adj, paid, ded, balance: earned + adj - paid - ded };
 }
 
-function current(ctx, uid) {
+export function current(ctx, uid) {
   const l = ledger(ctx, uid);
   const pending = sum(ctx, "SELECT SUM(amount) s FROM payments WHERE user_id=? AND status IN('pending','disputed')", uid);
   const debt = takeawayDebt(ctx, uid);
   return { ...l, pending, payable: Math.max(0, l.balance - pending), overpaid: Math.max(0, -l.balance), debt };
 }
 
-function settled(ctx, tkId) { return sum(ctx, 'SELECT SUM(amount) s FROM settlements WHERE takeaway_id=?', tkId); }
+export function settled(ctx, tkId) { return sum(ctx, 'SELECT SUM(amount) s FROM settlements WHERE takeaway_id=?', tkId); }
 
 // Kelishilgan, hali to'lanmagan olinganlar (qarz). Oldindan to'langanlar kirmaydi.
 function takeawayDebt(ctx, uid) {
@@ -43,7 +45,7 @@ function ownOrRahbar(ctx, uid) {
   return ctx.me.id;
 }
 
-function employee(ctx, id) {
+export function employee(ctx, id) {
   const u = ctx.user(needInt(id, 'user_id', 1));
   if (!u || !['bichuvchi', 'tikuvchi'].includes(u.role) || u.status === 'pending' || u.status === 'rejected') throw new AppError('bad_input', { field: 'user_id' });
   return u;
@@ -54,9 +56,9 @@ const METHOD = { prepaid: 'avval/alohida to‘langan', debt: 'hali qarz', payrol
 
 export function payslip(ctx, uid, from, to) {
   const u = ctx.user(uid);
-  const groups = ctx.db.all(`SELECT e.work, c.name type_name, b.model, e.price, SUM(e.qty) qty, SUM(e.amount) amount, COUNT(*) n
-    FROM earnings e JOIN lines l ON l.id=e.line_id JOIN batches b ON b.id=l.batch_id LEFT JOIN catalog c ON c.id=b.type_id
-    WHERE e.user_id=? AND e.day BETWEEN ? AND ? GROUP BY e.work, c.name, b.model, e.price ORDER BY e.work, c.name, b.model`, uid, from, to);
+  const groups = ctx.db.all(`SELECT e.work, (e.order_id IS NOT NULL) zakaz, c.name type_name, COALESCE(b.model,'') model, e.price, SUM(e.qty) qty, SUM(e.amount) amount, COUNT(*) n
+    FROM earnings e LEFT JOIN lines l ON l.id=e.line_id LEFT JOIN batches b ON b.id=l.batch_id LEFT JOIN catalog c ON c.id=b.type_id
+    WHERE e.user_id=? AND e.day BETWEEN ? AND ? GROUP BY e.work, zakaz, c.name, b.model, e.price ORDER BY e.work, zakaz, c.name, b.model`, uid, from, to);
   const earned = groups.reduce((a, g) => a + (g.amount || 0), 0);
   const missingQty = groups.filter((g) => g.price == null).reduce((a, g) => a + g.qty, 0);
   const opening = ledger(ctx, uid, addDays(from, -1)).balance;
@@ -64,7 +66,8 @@ export function payslip(ctx, uid, from, to) {
   const paidConfirmed = payments.filter((p) => ['confirmed', 'reverse_pending'].includes(p.status) && p.day >= from && p.day <= to).reduce((a, p) => a + p.amount, 0);
   const adjustments = ctx.db.all("SELECT * FROM adjustments WHERE user_id=? AND ((day BETWEEN ? AND ?) OR status IN('pending','disputed')) ORDER BY id", uid, from, to);
   const adjConfirmed = adjustments.filter((a) => a.status === 'confirmed' && a.day >= from && a.day <= to).reduce((s, a) => s + a.amount, 0);
-  const deductions = ctx.db.all(`SELECT s.*, t.name, t.kind FROM settlements s JOIN takeaways t ON t.id=s.takeaway_id WHERE s.user_id=? AND s.how='payroll' AND s.day BETWEEN ? AND ? ORDER BY s.id`, uid, from, to);
+  const deductions = ctx.db.all(`SELECT s.*, t.name, t.kind FROM settlements s JOIN takeaways t ON t.id=s.takeaway_id WHERE s.user_id=? AND s.how='payroll' AND s.day BETWEEN ? AND ? ORDER BY s.id`, uid, from, to)
+    .concat(ctx.db.all(`SELECT id, amount, day, 'cash' kind, NULL name FROM cash_handovers WHERE user_id=? AND how='payroll' AND status='confirmed' AND day BETWEEN ? AND ? ORDER BY id`, uid, from, to));
   const ded = deductions.reduce((a, d) => a + d.amount, 0);
   const takeaways = ctx.db.all("SELECT * FROM takeaways WHERE user_id=? AND ((day BETWEEN ? AND ?) OR (status NOT IN('cancelled') AND status<>'agreed') OR (status='agreed' AND pay_method IN('debt','payroll'))) ORDER BY day, id", uid, from, to).map((k) => tkView(ctx, k));
   const decl = ctx.db.one('SELECT * FROM declarations WHERE user_id=? AND period=?', uid, from.slice(0, 7));
@@ -83,9 +86,20 @@ function blockers(ps) {
   if (ps.missingQty) b.push('missing_rate');
   if (ps.payments.some((p) => ['pending', 'disputed', 'reverse_pending'].includes(p.status))) b.push('payment_open');
   if (ps.adjustments.some((a) => ['pending', 'disputed'].includes(a.status))) b.push('adjustment_open');
-  if (ps.takeaways.some((k) => ['submitted', 'review', 'employee', 'disputed'].includes(k.status))) b.push('takeaway_open');
+  if (ps.takeaways.some((k) => ['submitted', 'review', 'employee', 'disputed', 'priced'].includes(k.status))) b.push('takeaway_open');
   if (ps.now.payable > 0) b.push('payable_left');
   return b;
+}
+
+// «Пул бердим» yozuvi (oylik yoki avans). Xodim «Pulni oldim» bosguncha hisobga kirmaydi.
+export function createPayment(ctx, u, amount, kind, day, from, to) {
+  const r = ctx.db.one(`INSERT INTO payments(code,user_id,amount,day,period_from,period_to,method,kind,status,created_by,created_at)
+    VALUES(?,?,?,?,?,?,'naqd',?,'pending',?,?) RETURNING id`, 'tmp' + ctx.now + Math.random(), u.id, amount, day, from, to, kind, ctx.me.id, ctx.at);
+  const code = 'PUL-' + String(r.id).padStart(4, '0');
+  ctx.db.run('UPDATE payments SET code=? WHERE id=?', code, r.id);
+  ctx.audit('payment_created', 'payment', r.id, null, { code, user_id: u.id, amount, kind, day, from, to });
+  ctx.tell(u, `Rahbar sizga ${fmtSum(amount)} so‘m naqd berganini qayd etdi (${kind === 'avans' ? 'avans' : 'hisob'}${from ? ', ' + from + ' — ' + to : ''}). Ilovada «Pulni oldim» yoki «Tafovut bor» ni bosing.`);
+  return { id: r.id, code };
 }
 
 export const actions = {
@@ -247,13 +261,7 @@ export const actions = {
       const from = b.from && isDay(b.from) ? b.from : null, to = b.to && isDay(b.to) ? b.to : null;
       const cur = current(ctx, u.id);
       if (kind === 'oylik' && amount > cur.payable) throw new AppError('over_payable', { payable: cur.payable, pending: cur.pending });
-      const r = ctx.db.one(`INSERT INTO payments(code,user_id,amount,day,period_from,period_to,method,kind,status,created_by,created_at)
-        VALUES(?,?,?,?,?,?,'naqd',?,'pending',?,?) RETURNING id`, 'tmp' + ctx.now + Math.random(), u.id, amount, day, from, to, kind, ctx.me.id, ctx.at);
-      const code = 'PUL-' + String(r.id).padStart(4, '0');
-      ctx.db.run('UPDATE payments SET code=? WHERE id=?', code, r.id);
-      ctx.audit('payment_created', 'payment', r.id, null, { code, user_id: u.id, amount, kind, day, from, to });
-      ctx.tell(u, `Rahbar sizga ${fmtSum(amount)} so‘m naqd berganini qayd etdi (${kind === 'avans' ? 'avans' : 'hisob'}${from ? ', ' + from + ' — ' + to : ''}). Ilovada «Pulni oldim» yoki «Tafovut bor» ni bosing.`);
-      return { id: r.id, code };
+      return createPayment(ctx, u, amount, kind, day, from, to);
     },
   },
 
@@ -400,6 +408,8 @@ export const actions = {
         takeaways: ctx.db.all("SELECT * FROM takeaways WHERE user_id=? AND status='employee' ORDER BY id", me),
         declaration: (ctx.db.one('SELECT answer FROM declarations WHERE user_id=? AND period=?', me, period) || {}).answer || null,
         period, now: current(ctx, me),
+        rk: ctx.db.one("SELECT id, period, total FROM reckonings WHERE user_id=? AND status='sent' ORDER BY id DESC LIMIT 1", me) || null,
+        avans: ctx.db.one("SELECT * FROM avans_req WHERE user_id=? AND status='pending'", me) || null,
       };
     },
   },
@@ -410,6 +420,8 @@ export const actions = {
       const users = ctx.db.all("SELECT * FROM users WHERE role IN('bichuvchi','tikuvchi') AND status IN('active','inactive') ORDER BY status, first_name");
       return users.map((u) => ({ id: u.id, name: fullName(u), role: u.role, status: u.status, ...current(ctx, u.id),
         missing: ctx.db.one('SELECT COUNT(*) n FROM earnings WHERE user_id=? AND amount IS NULL', u.id).n,
+        avans: ctx.db.one("SELECT amount FROM avans_req WHERE user_id=? AND status='pending'", u.id)?.amount || 0,
+        rk: ctx.db.one('SELECT status, period, total FROM reckonings WHERE user_id=? ORDER BY id DESC LIMIT 1', u.id) || null,
         open: ctx.db.one("SELECT (SELECT COUNT(*) FROM payments WHERE user_id=? AND status IN('pending','disputed','reverse_pending')) + (SELECT COUNT(*) FROM takeaways WHERE user_id=? AND status IN('submitted','review','disputed','employee')) n", u.id, u.id).n }))
         .filter((r) => r.status === 'active' || r.balance !== 0 || r.debt || r.pending);
     },

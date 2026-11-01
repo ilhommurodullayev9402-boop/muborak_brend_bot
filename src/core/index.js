@@ -6,9 +6,13 @@ import { actions as production } from './production.js';
 import { actions as money } from './money.js';
 import { actions as reports, birthdayTick } from './reports.js';
 import { actions as voice } from './voice.js';
+import { actions as photos } from './photos.js';
+import { actions as oylik } from './oylik.js';
+import { actions as orders, orderTick } from './orders.js';
+import { actions as murojaat } from './murojaat.js';
 import { migrate } from '../schema.js';
 
-export const ACTIONS = { ...staff, ...attendance, ...production, ...money, ...reports, ...voice };
+export const ACTIONS = { ...staff, ...attendance, ...production, ...money, ...reports, ...voice, ...photos, ...oylik, ...orders, ...murojaat };
 export { AppError, migrate };
 
 function authorize(auth, me) {
@@ -46,7 +50,7 @@ export function handle(db, cfg, tg, action, body, nowMs) {
 export function cronTick(db, cfg, nowMs) {
   return db.tx(() => {
     const ctx = new Ctx(db, nowMs, cfg);
-    const sent = birthdayTick(ctx);
+    const sent = birthdayTick(ctx).concat(orderTick(ctx));
     db.run("DELETE FROM idem WHERE at < ?", new Date(nowMs - 30 * 86400000).toISOString());
     return { sent, notify: ctx.notify };
   });

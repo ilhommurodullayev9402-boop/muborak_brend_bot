@@ -1,6 +1,6 @@
 {
   // MUBORAK BREND — Telegram Mini App serveri
-  "name": "muborak-brend",
+  "name": "muborak-brend-bot",
   "main": "src/worker.js",
   "compatibility_date": "2025-09-01",
   "assets": { "directory": "./public", "binding": "ASSETS" },

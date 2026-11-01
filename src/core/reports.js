@@ -1,4 +1,5 @@
 // Rahbar hisobotlari: bosh ekran, ishlab chiqarish oqimi va davr oxiri qoldig'i, «qoldiq kimda», tug'ilgan kun eslatmalari.
+import { leaveOn } from './murojaat.js';
 import { AppError, needDay, addDays, COUNTED, STATES, fullName, lineLabel, fmtSum } from './base.js';
 import { metrics } from './attendance.js';
 
@@ -39,18 +40,21 @@ export const actions = {
     fn(ctx) {
       const day = ctx.day;
       const s = Object.fromEntries(ctx.db.all('SELECT k,v FROM settings').map((r) => [r.k, r.v]));
-      const staff = ctx.db.all("SELECT id,first_name,last_name,role FROM users WHERE role IN('bichuvchi','tikuvchi') AND status='active'");
+      const staff = ctx.db.all("SELECT id,first_name,last_name,role FROM users WHERE role IN('bichuvchi','tikuvchi') AND status='active' AND remote=0");
+      const remoteN = ctx.db.one("SELECT COUNT(*) n FROM users WHERE role IN('bichuvchi','tikuvchi') AND status='active' AND remote=1").n;
       const att = ctx.db.all('SELECT * FROM attendance WHERE day=?', day).map((r) => ({ ...metrics(r, s, day), user_id: r.user_id }));
       const yNoOut = ctx.db.one('SELECT COUNT(*) n FROM attendance WHERE day=? AND in_at IS NOT NULL AND out_at IS NULL', addDays(day, -1)).n;
+      const onLeave = leaveOn(ctx, day);
       const f = flows(ctx, day, day, {});
       const bal = balancesAsOf(ctx, '9999-12-31', {});
       const month = day.slice(0, 7);
       const n = (q, ...p) => ctx.db.one(q, ...p).n;
       return {
         day, geo_set: !!(s.lat && s.lng),
-        att: { staff: staff.length, came: att.filter((a) => a.in).length, left: att.filter((a) => a.out).length,
+        att: { staff: staff.length, remote: remoteN, came: att.filter((a) => a.in).length, left: att.filter((a) => a.out).length,
           late: att.filter((a) => a.late > 0).length, working: att.filter((a) => a.status === 'working').length, yesterday_no_out: yNoOut,
-          absent: staff.filter((u) => !att.find((a) => a.user_id === u.id && a.in)).map((u) => fullName(u)) },
+          absent: staff.filter((u) => !onLeave.includes(u.id) && !att.find((a) => a.user_id === u.id && a.in)).map((u) => fullName(u)),
+          leave: staff.filter((u) => onLeave.includes(u.id)).map((u) => fullName(u)) },
         today: { ready: (f.cut_ready || 0) + (f.partial_done || 0), partial: f.cut_partial || 0, given: f.transfer_reserve || 0,
           submitted: f.submit || 0, accepted: f.accept || 0 },
         bal,
@@ -62,6 +66,13 @@ export const actions = {
           takeaways: n("SELECT COUNT(*) n FROM takeaways WHERE status IN('submitted','review','disputed')"),
           payments: n("SELECT COUNT(*) n FROM payments WHERE status IN('disputed')"),
           missing_rate: n('SELECT COUNT(*) n FROM earnings WHERE amount IS NULL'),
+          avans: n("SELECT COUNT(*) n FROM avans_req WHERE status='pending'"),
+          ord_overdue: n("SELECT COUNT(*) n FROM orders WHERE status IN('new','cut','given','sewing','sewn','fixing') AND due_day<?", day),
+          ord_price: n("SELECT COUNT(*) n FROM orders WHERE status NOT IN('cancelled','closed') AND price_ok=0"),
+          ord_left: n("SELECT COUNT(*) n FROM orders WHERE status='abandoned'"),
+          mj: n("SELECT COUNT(*) n FROM appeals WHERE status='open'"),
+          cash: n("SELECT COUNT(*) n FROM cash_handovers WHERE status='pending'"),
+          rk: n("SELECT COUNT(*) n FROM reckonings WHERE status IN('disputed','stale') AND id IN (SELECT MAX(id) FROM reckonings GROUP BY user_id)"),
         },
         money: {
           earned_month: ctx.db.one("SELECT COALESCE(SUM(amount),0) n FROM earnings WHERE substr(day,1,7)=?", month).n,

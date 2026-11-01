@@ -1,4 +1,5 @@
 // Partiyalar, bichim, bichuvchidan tikuvchiga topshirish, tikish, tayyor deb topshirish va tekshiruv.
+import { attachPhoto, attachVoice } from './photos.js';
 import { AppError, needInt, needText, optText, fullName, lineLabel, tHM } from './base.js';
 
 const SIZE_RE = /^[0-9A-Za-z\-\/ ]{1,12}$/;
@@ -62,7 +63,7 @@ function batchView(ctx, batchId, withHolders) {
   const lines = ctx.db.all('SELECT * FROM lines WHERE batch_id=? ORDER BY CAST(size AS INTEGER), size', batchId);
   const bals = ctx.db.all(`SELECT bal.*, u.first_name, u.last_name FROM bal LEFT JOIN users u ON u.id=bal.holder
     WHERE line_id IN (SELECT id FROM lines WHERE batch_id=?) AND qty>0`, batchId);
-  const out = { id: b.id, code: b.code, day: b.day, type_name: b.type_name, type_id: b.type_id, model: b.model, material: b.material, color: b.color,
+  const out = { id: b.id, code: b.code, day: b.day, type_name: b.type_name, type_id: b.type_id, model: b.model, material: b.material, color: b.color, photo_id: b.photo_id,
     note: b.note, opening: !!b.opening, cutter: b.cutter_id ? `${b.cf} ${b.cl}` : null, cutter_id: b.cutter_id, lines: [], totals: {} };
   for (const l of lines) {
     const lb = bals.filter((x) => x.line_id === l.id);
@@ -85,7 +86,7 @@ function canSeeBatch(ctx, batch) {
 function transferView(ctx, t) {
   const items = ctx.db.all('SELECT * FROM transfer_items WHERE transfer_id=? ORDER BY id', t.id).map((i) => {
     const li = ctx.lineInfo(i.line_id);
-    return { ...i, label: lineLabel(li), code: li.code, size: li.size, model: li.model, material: li.material, color: li.color, type_name: li.type_name };
+    return { ...i, label: lineLabel(li), code: li.code, size: li.size, model: li.model, material: li.material, color: li.color, type_name: li.type_name, photo_id: li.photo_id };
   });
   const f = ctx.user(t.from_id), to = ctx.user(t.to_id);
   return { ...t, from_name: fullName(f), to_name: fullName(to), items, total: items.reduce((a, i) => a + i.qty, 0), time: tHM(Date.parse(t.created_at)) };
@@ -119,6 +120,7 @@ export const actions = {
     fn(ctx, b) {
       const lines = normLines(b.lines);
       const nb = newBatch(ctx, b, false);
+      if (b.photo_id) ctx.db.run('UPDATE batches SET photo_id=? WHERE id=?', attachPhoto(ctx, b.photo_id), nb.id);
       const tot = addCut(ctx, nb.id, lines);
       ctx.audit('batch_created', 'batch', nb.id, null, { code: nb.code, lines });
       return { ...nb, ...tot };
@@ -132,6 +134,7 @@ export const actions = {
       if (!batch || batch.opening) throw new AppError('not_found');
       if (ctx.me.role !== 'rahbar' && batch.cutter_id !== ctx.me.id) throw new AppError('forbidden', {}, 403);
       const lines = normLines(b.lines);
+      if (b.photo_id) ctx.db.run('UPDATE batches SET photo_id=? WHERE id=?', attachPhoto(ctx, b.photo_id), batch.id);
       const tot = addCut(ctx, batch.id, lines);
       ctx.audit('cut_added', 'batch', batch.id, null, { lines });
       return { id: batch.id, code: batch.code, ...tot };
@@ -215,8 +218,9 @@ export const actions = {
         if (ctx.me.role !== 'rahbar' && li.cutter_id !== ctx.me.id && !li.opening) throw new AppError('forbidden', {}, 403);
         items.push({ li, qty: needInt(it.qty, 'qty', 1, 100000) });
       }
-      const t = ctx.db.one(`INSERT INTO transfers(code,from_id,to_id,status,via,note,created_at,day) VALUES(?,?,?,?,?,?,?,?) RETURNING id`,
-        'tmp' + ctx.now + Math.random(), ctx.me.id, to.id, 'pending', b.via === 'voice' ? 'voice' : 'manual', optText(b.note, 300), ctx.at, ctx.day);
+      const voice = b.voice_id ? attachVoice(ctx, b.voice_id) : null;
+      const t = ctx.db.one(`INSERT INTO transfers(code,from_id,to_id,status,via,note,created_at,day,voice_id) VALUES(?,?,?,?,?,?,?,?,?) RETURNING id`,
+        'tmp' + ctx.now + Math.random(), ctx.me.id, to.id, 'pending', b.via === 'voice' ? 'voice' : 'manual', optText(b.note, 300), ctx.at, ctx.day, voice);
       const code = 'T-' + String(t.id).padStart(4, '0');
       ctx.db.run('UPDATE transfers SET code=? WHERE id=?', code, t.id);
       for (const it of items) {
@@ -230,7 +234,13 @@ export const actions = {
       }
       ctx.audit('transfer_created', 'transfer', t.id, null, { code, to: to.id, items: items.map((i) => [i.li.line_id, i.qty]) });
       const total = items.reduce((a, i) => a + i.qty, 0);
-      ctx.tell(to, `Sizga ${total} dona ish berildi (${code}). Ilovada sanab, «Qabul qildim» tugmasini bosing.`);
+      const desc = items.map((i) => `• ${lineLabel(i.li)}: ${i.qty} dona`).join('\n');
+      const text = `Sizga ${total} dona ish berildi (${code}), ${fullName(ctx.me)}dan:\n${desc}${b.note ? '\nIzoh: ' + optText(b.note, 300) : ''}\nIlovada sanab, «Qabul qildim» tugmasini bosing.`;
+      // Partiya rasmi bo'lsa — xabar rasm bilan boradi (har xil partiya bo'lsa, birinchisining rasmi)
+      const ph = items.map((i) => i.li.photo_id).find(Boolean);
+      const file = ph ? ctx.db.one('SELECT file_id FROM photos WHERE id=?', ph) : null;
+      const vf = voice ? ctx.db.one('SELECT file_id FROM photos WHERE id=?', voice) : null;
+      if (to.status === 'active') ctx.notify.push({ tg_id: to.tg_id, text, photo: file ? file.file_id : null, voice: vf ? vf.file_id : null });
       return { id: t.id, code, total };
     },
   },
@@ -264,7 +274,7 @@ export const actions = {
         const x = (byLine[h.line_id] ||= { line_id: h.line_id, sewing: 0, rework: 0, review: 0 });
         x[h.state] += h.qty;
       }
-      const lines = Object.values(byLine).map((x) => { const li = ctx.lineInfo(x.line_id); return { ...x, label: lineLabel(li), code: li.code, size: li.size, model: li.model, material: li.material, color: li.color, type_name: li.type_name }; });
+      const lines = Object.values(byLine).map((x) => { const li = ctx.lineInfo(x.line_id); return { ...x, label: lineLabel(li), code: li.code, size: li.size, model: li.model, material: li.material, color: li.color, type_name: li.type_name, photo_id: li.photo_id }; });
       const sum = (k) => lines.reduce((a, l) => a + l[k], 0);
       const month = ctx.day.slice(0, 7);
       const acc = ctx.db.one("SELECT COALESCE(SUM(qty),0) q FROM moves WHERE kind='accept' AND to_holder=? AND substr(day,1,7)=?", me, month);
@@ -369,7 +379,7 @@ export const actions = {
     auth: 'inspect',
     fn(ctx) {
       return ctx.db.all("SELECT s.*, u.first_name, u.last_name FROM submissions s JOIN users u ON u.id=s.sewer_id WHERE s.open_qty>0 ORDER BY s.id")
-        .map((s) => { const li = ctx.lineInfo(s.line_id); return { ...s, name: fullName(s), label: lineLabel(li), code: li.code, size: li.size, model: li.model, material: li.material, color: li.color, type_name: li.type_name, time: tHM(Date.parse(s.at)), own: s.sewer_id === ctx.me.id }; });
+        .map((s) => { const li = ctx.lineInfo(s.line_id); return { ...s, name: fullName(s), label: lineLabel(li), code: li.code, size: li.size, model: li.model, material: li.material, color: li.color, type_name: li.type_name, photo_id: li.photo_id, time: tHM(Date.parse(s.at)), own: s.sewer_id === ctx.me.id }; });
     },
   },
 

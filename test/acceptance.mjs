@@ -12,10 +12,27 @@ const DAY = 86400000;
 
 // Telegram API o'rniga lokal qabul qiluvchi: bildirishnomalarni tekshirish uchun
 const tgSent = [];
+const tgPhotos = [];
+let phN = 0;
 const mock = http.createServer((req, res) => {
-  let d = '';
-  req.on('data', (c) => (d += c));
-  req.on('end', () => { try { tgSent.push(JSON.parse(d)); } catch {} res.end('{"ok":true}'); });
+  const chunks = [];
+  req.on('data', (c) => chunks.push(c));
+  req.on('end', () => {
+    const buf = Buffer.concat(chunks), d = buf.toString('latin1');
+    if (req.url.includes('/file/bot')) { res.setHeader('content-type', 'image/jpeg'); return res.end(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9])); }
+    const method = req.url.split('/').pop();
+    if (['sendPhoto', 'sendDocument'].includes(method) && /multipart/.test(req.headers['content-type'] || '')) {
+      const chat = (d.match(/name="chat_id"\r\n\r\n([^\r]*)/) || [])[1];
+      const caption = Buffer.from((d.match(/name="caption"\r\n\r\n([^\r]*)/) || [])[1] || '', 'latin1').toString('utf8');
+      phN++; tgPhotos.push({ chat, caption, bytes: buf.length, method });
+      if (method === 'sendDocument' && /ovozli-izoh/.test(d)) return res.end(JSON.stringify({ ok: true, result: { message_id: phN, document: { file_id: 'VOICE' + phN, file_unique_id: 'V' + phN } } }));
+      if (method === 'sendDocument') { try {} catch {} return res.end('{"ok":true,"result":{"message_id":0}}'); }
+      return res.end(JSON.stringify({ ok: true, result: { message_id: phN, photo: [{ file_id: 'small' + phN, file_unique_id: 's' + phN, width: 90, height: 90 }, { file_id: 'FILE' + phN, file_unique_id: 'U' + phN, width: 800, height: 600 }] } }));
+    }
+    if (method === 'getFile') return res.end(JSON.stringify({ ok: true, result: { file_path: 'photos/f.jpg' } }));
+    try { const j = JSON.parse(buf.toString('utf8')); j._method = method; tgSent.push(j); } catch {}
+    res.end('{"ok":true}');
+  });
 }).listen(8799);
 
 const results = [];
@@ -204,7 +221,7 @@ async function main() {
   const tr = await api(SAR, 'transfer_create', { to_id: ruxId, items: [{ line_id: L46, qty: 10 }], rid: rid() });
   let sh = await api(RUX, 'sew_home');
   check(sh.incoming.some((x) => x.id === tr.id && x.total === 10), 'Tikuvchida kelgan ish: 10 dona, tafsiloti bilan');
-  check(tgSent.some((m) => m.chat_id === RUX && /Sizga 10 dona/.test(m.text)), 'Tikuvchiga lotincha bildirishnoma ketdi');
+  check(tgSent.some((m) => m.chat_id === RUX && /Sizga 10 dona/.test(m.text || m.caption)), 'Tikuvchiga lotincha bildirishnoma ketdi');
   await api(RUX, 'transfer_accept', { id: tr.id, rid: rid() });
   await api(RUX, 'submit', { line_id: L46, qty: 8, rid: rid() });
   sh = await api(RUX, 'sew_home');
@@ -389,6 +406,216 @@ async function main() {
   const cr2 = await (await fetch(`${BASE}/__test/cron`, { method: 'POST', headers: { 'x-test-now': String(NOW) } })).json();
   check(cr.result.some((x) => x.user_id === ruxId && x.kind === 'soon') && cr2.result.length === 0, 'Ruxshona (4-noyabr): 2 kun oldin eslatma, qayta ishga tushganda dublikat yo‘q', { cr, cr2 });
   check(tgSent.some((m) => m.chat_id === OWNER && /туғилган куни/.test(m.text)) && !tgSent.some((m) => m.chat_id !== OWNER && /туғилган|tug‘ilgan/.test(m.text)), 'Eslatma faqat rahbarga (kirillda)');
+  test(15, 'Qo‘shimcha: uydan ishlaydigan xodim — davomat so‘ralmaydi, ish va pul odatdagidek');
+  let qh0 = await api(OWNER, 'r_home');
+  await api(OWNER, 'staff_remote', { user_id: dilId, on: true, rid: 'rem-1' });
+  await api(OWNER, 'staff_remote', { user_id: dilId, on: true, rid: 'rem-1' });
+  let qh1 = await api(OWNER, 'r_home');
+  check(qh1.att.staff === qh0.att.staff - 1 && qh1.att.remote === 1 && !qh1.att.absent.some((n) => n.startsWith('Dilnoza')), 'Rahbar ekranida u «kelmadi» ro‘yxatida yo‘q, alohida sanaladi', qh1.att);
+  check((await api(DIL, 'me')).remote === true, 'Xodimning o‘zi «uydan ishlaydi» holatini ko‘radi');
+  const qam = await api(DIL, 'att_mark', { kind: 'in', loc: { lat: 1, lng: 1, acc: 5 }, bio: 'ok' });
+  check(qam.ok === false && qam.reason === 'remote', 'Davomat belgilash talab qilinmaydi (server ham qabul qilmaydi)', qam);
+  const qex = await raw(DIL, 'att_exception', { kind: 'in', reason: 'other' });
+  check(qex.status >= 400, 'Uydagi xodimdan davomat so‘rovi ham olinmaydi');
+  const qpr = await api(DIL, 'sew_home');
+  check(qpr && typeof qpr === 'object', 'Ish bo‘limi odatdagidek ochiladi');
+  await new Promise((r) => setTimeout(r, 400));
+  const qau = await api(OWNER, 'audit_list', { limit: 5 });
+  check(qau.filter((x) => x.action === 'remote_changed').length === 1 && tgSent.some((m) => m.chat_id === DIL && /uydan ishlaydi/i.test(m.text)), 'Audit bitta yozuv (qayta bosish takrorlamaydi), xodimga xabar ketdi');
+  await api(OWNER, 'staff_remote', { user_id: dilId, on: false });
+  check((await api(OWNER, 'r_home')).att.staff === qh0.att.staff, 'Qaytarib «korxonada» qilinganda yana davomatda hisoblanadi');
+
+  test(16, 'Qo‘shimcha: rasm va ovozli izoh, «Olganlarim» ro‘yxati, avans so‘rash, oylik hisob tasdig‘i');
+  const SAVE_NOW = NOW;
+  NOW = Date.parse('2026-11-05T06:00:00Z');
+  const NOD = 2020;
+  await api(NOD, 'register', { role: 'tikuvchi', first_name: 'Nodira', last_name: 'Karimova', bd: 1, bm: 2, by: 1999, rid: rid() });
+  const nodId = (await api(OWNER, 'staff_list')).users.find((u) => u.tg_id === NOD).id;
+  await api(OWNER, 'staff_decide', { user_id: nodId, approve: true, rid: rid() });
+  const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(600, 7), Buffer.from([0xff, 0xd9])]).toString('base64');
+  const ph = await api(SAR, 'photo_upload', { data: 'data:image/jpeg;base64,' + JPG, what: 'Bahor', sec: 'bichim' });
+  const lastPh = tgPhotos[tgPhotos.length - 1];
+  check(ph.id > 0 && lastPh.chat === '-1001234567890' && /^#bichim 📷 .* · \d\d\.\d\d\.2026 · Bahor$/.test(lastPh.caption), 'Rasm yopiq kanalga yuklandi (izoh bilan), bazada faqat havola', lastPh);
+  check((await raw(SAR, 'photo_save', { file_id: 'soxta' })).status === 404 && (await raw(SAR, 'photo_upload', { data: Buffer.from('salom').toString('base64') })).status === 400, 'Soxta havola yoki rasm bo‘lmagan fayl qabul qilinmaydi');
+  const bb = await api(SAR, 'batch_create', { type_id: KOYLAK, model: 'Bahor', material: 'Pombaxt', color: 'Sariq', lines: [{ size: '48', ready: 30 }], photo_id: ph.id, rid: rid() });
+  check((await raw(SAR, 'batch_create', { type_id: KOYLAK, model: 'X', material: 'Y', color: 'Z', lines: [{ size: '48', ready: 1 }], photo_id: ph.id })).error === 'bad_input', 'Bitta rasm ikki partiyaga biriktirilmaydi');
+  const bline = (await api(SAR, 'batch_detail', { batch_id: bb.id })).lines[0].line_id;
+  const vc = await api(SAR, 'voice_upload', { data: 'data:audio/webm;base64,' + Buffer.alloc(900, 3).toString('base64'), mime: 'audio/webm' });
+  const t16 = await api(SAR, 'transfer_create', { to_id: nodId, items: [{ line_id: bline, qty: 30 }], note: 'Yoqasi ikki qavat', voice_id: vc.id, rid: rid() });
+  await new Promise((r) => setTimeout(r, 400));
+  const pm = tgSent.find((m) => m._method === 'sendPhoto' && m.chat_id === NOD);
+  const vm = tgSent.find((m) => m._method === 'sendDocument' && m.chat_id === NOD && /VOICE/.test(m.document));
+  check(pm && /30 dona/.test(pm.caption) && /Bahor/.test(pm.caption) && /Yoqasi ikki qavat/.test(pm.caption) && vm, 'Tikuvchiga Telegram’da rasm + tavsif + ovozli izoh bordi', { pm, vm });
+  const inc = (await api(NOD, 'sew_home')).incoming.find((x) => x.id === t16.id);
+  check(inc && inc.items[0].photo_id === ph.id && inc.voice_id === vc.id && inc.note === 'Yoqasi ikki qavat', 'Ilovada ham rasm, yozma va ovozli izoh ko‘rinadi');
+  const getMedia = async (tg, action, id) => {
+    const init = await signInitData({ auth_date: String(Math.floor(NOW / 1000)), user: JSON.stringify({ id: tg, first_name: 'T' }) }, TOKEN);
+    const r = await fetch(`${BASE}/api/${action}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-init-data': init, 'x-test-now': String(NOW) }, body: JSON.stringify({ id }) });
+    return { status: r.status, type: r.headers.get('content-type') };
+  };
+  let g1 = await getMedia(NOD, 'photo_get', ph.id), g2 = await getMedia(DIL, 'photo_get', ph.id), g3 = await getMedia(NOD, 'voice_get', vc.id), g4 = await getMedia(DIL, 'voice_get', vc.id);
+  check(g1.status === 200 && /image/.test(g1.type) && g3.status === 200 && /audio/.test(g3.type) && g2.status === 403 && g4.status === 403, 'Rasm/ovozni ish berilgan tikuvchi ochadi, begona xodim ocha olmaydi', { g1, g2, g3, g4 });
+  await api(NOD, 'transfer_accept', { id: t16.id, rid: rid() });
+  await api(NOD, 'submit', { line_id: bline, qty: 30, rid: rid() });
+  const sub16 = (await api(OWNER, 'insp_list')).find((x) => x.sewer_id === nodId);
+  await api(OWNER, 'inspect', { submission_id: sub16.id, accepted: 30, rid: rid() });
+  // Olganlarim
+  const tph = await api(NOD, 'photo_upload', { data: JPG, what: 'Olganim' });
+  const k1 = await api(NOD, 'tk_add', { name: '3 metr pombaxt', photo_id: tph.id, rid: rid() });
+  const k2 = await api(NOD, 'tk_add', { name: '3 ta zamok', rid: rid() });
+  const k3 = await api(NOD, 'tk_add', { name: '1 ta ko‘ylak tiktirdim', rid: rid() });
+  check((await getMedia(DIL, 'photo_get', tph.id)).status === 403 && (await getMedia(OWNER, 'photo_get', tph.id)).status === 200, '«Olganlarim» rasmini rahbar ko‘radi, boshqa xodim ko‘rmaydi');
+  check(tgSent.filter((m) => m.chat_id === OWNER && /олганларини ёзмоқда/.test(m.text || '')).length === 1, 'Ketma-ket ro‘yxat uchun rahbarga bitta xabar (har qatorga emas)');
+  let rs = await raw(OWNER, 'rk_send', { user_id: nodId });
+  check(rs.error === 'cannot_send' && rs.params.blockers.includes('unpriced'), 'Narx qo‘yilmaguncha hisob yuborilmaydi', rs);
+  await api(OWNER, 'tk_price', { id: k1.id, amount: 75000, rid: rid() });
+  await api(OWNER, 'tk_price', { id: k2.id, amount: 6000, rid: rid() });
+  await api(OWNER, 'tk_price', { id: k3.id, amount: 50000, prepaid: true, rid: rid() });
+  // Avans
+  const av = await api(NOD, 'av_request', { amount: 100000, note: 'uy uchun', rid: rid() });
+  check((await raw(NOD, 'av_request', { amount: 50000 })).error === 'avans_pending', 'Javobsiz avans so‘rovi turganda ikkinchisi yuborilmaydi');
+  check((await api(OWNER, 'r_home')).todo.avans === 1, 'Rahbar bosh ekranida «Аванс сўровлари»');
+  const avd = await api(OWNER, 'av_decide', { id: av.id, give: true, amount: 80000, rid: rid() });
+  await api(NOD, 'pay_confirm', { id: avd.payment_id, rid: rid() });
+  let rv = await api(NOD, 'rk_view', {});
+  const LV = rv.live;
+  check(LV.earned === 300000 && LV.avansSum === 80000 && LV.itemsSum === 81000 && LV.total === 139000 && LV.prepaid.length === 1 && !LV.blockers.length,
+    'Hisob: 30×10 000 = 300 000 − avans 80 000 − olganlar 81 000 = 139 000 (alohida to‘langan ko‘ylak ayirilmaydi)', LV);
+  const sent = await api(OWNER, 'rk_send', { user_id: nodId, rid: rid() });
+  // Yuborilgandan keyin yangi narxli yozuv qo'shilsa — eski hisob tasdiqlanmaydi
+  const k4 = await api(NOD, 'tk_add', { name: '1 g‘altak ip', rid: rid() });
+  await api(OWNER, 'tk_price', { id: k4.id, amount: 4000, rid: rid() });
+  let ans = await api(NOD, 'rk_answer', { id: sent.id, agree: true, rid: rid() });
+  check(ans.stale === true && (await api(OWNER, 'r_home')).todo.rk === 1, 'Yuborilgandan keyin o‘zgarsa — eskisi tasdiqlanmaydi, rahbarga «qayta yuboring»', ans);
+  const sent2 = await api(OWNER, 'rk_send', { user_id: nodId, rid: rid() });
+  check(sent2.total === 135000, 'Qayta yuborilgan hisob: 135 000', sent2);
+  const rid16 = rid();
+  await api(NOD, 'rk_answer', { id: sent2.id, agree: true, rid: rid16 });
+  await api(NOD, 'rk_answer', { id: sent2.id, agree: true, rid: rid16 });
+  let ps16 = await api(OWNER, 'payslip', { user_id: nodId, from: '2026-11-01', to: '2026-11-30' });
+  check(ps16.now.payable === 135000 && ps16.ded === 85000, 'Tasdiqdan keyin olganlar oylikdan bir marta ushlandi, beriladigan: 135 000', { payable: ps16.now.payable, ded: ps16.ded });
+  const rv2 = await api(NOD, 'rk_view', {});
+  check(rv2.rk.status === 'confirmed' && rv2.live.total === 135000 && rv2.live.items.length === 0, 'Qayta hisoblaganda o‘sha natija, ikki marta ushlanmaydi', rv2.live);
+  const py = await api(OWNER, 'pay_create', { user_id: nodId, amount: 135000, kind: 'oylik', rid: rid() });
+  await api(NOD, 'pay_confirm', { id: py.id, rid: rid() });
+  ps16 = await api(OWNER, 'payslip', { user_id: nodId, from: '2026-11-01', to: '2026-11-30' });
+  check(ps16.now.payable === 0 && ps16.now.balance === 0, '«Пул бердим» → «Pulni oldim»: hisob nolga tushdi');
+  // E'tiroz yo'li
+  const k5 = await api(NOD, 'tk_add', { name: '2 metr paplin', rid: rid() });
+  await api(OWNER, 'tk_price', { id: k5.id, amount: 30000, rid: rid() });
+  const s3 = await api(OWNER, 'rk_send', { user_id: nodId, rid: rid() });
+  check(s3.total === -30000, 'Olgani ishidan ko‘p bo‘lsa — qarz sifatida aniq ko‘rinadi (−30 000)', s3);
+  await api(NOD, 'rk_answer', { id: s3.id, agree: false, note: 'paplin 1 metr edi', rid: rid() });
+  rv = await api(OWNER, 'rk_view', { user_id: nodId });
+  check(rv.rk.status === 'disputed' && rv.rk.dispute_note === 'paplin 1 metr edi' && (await api(OWNER, 'payslip', { user_id: nodId, from: '2026-11-01', to: '2026-11-30' })).ded === 85000, 'E’tiroz: hech narsa ushlanmaydi, rahbar izohni ko‘radi');
+  check((await raw(DIL, 'rk_view', { user_id: nodId })).status === 403 && (await raw(NOD, 'tk_price', { id: k5.id, amount: 1 })).status === 403, 'Boshqa xodim hisobini ko‘rib bo‘lmaydi, xodim o‘ziga narx qo‘ya olmaydi');
+
+  test(17, 'Qo‘shimcha: alohida buyurtma (zakaz) — o‘lcham, muddat, eslatma, kiyib ko‘rish, mijoz puli');
+  NOW = Date.parse('2026-11-06T05:00:00Z');
+  const sarU = sarId;
+  const tpl0 = await api(SAR, 'ord_tpl');
+  await api(SAR, 'ord_tpl_set', { fields: ['Bo‘y', 'Bel', 'Ko‘krak', 'Bo‘y', ''], rid: rid() });
+  const tpl1 = await api(SAR, 'ord_tpl');
+  check(tpl0.fields.length > 3 && tpl1.fields.join() === 'Bo‘y,Bel,Ko‘krak', 'O‘lcham shabloni: standart ro‘yxat, bichuvchi o‘zinikini saqlaydi (takrorlar olib tashlanadi)', tpl1);
+  check((await raw(SAR, 'ord_create', { customer: 'Gulnora', product: 'Ko‘ylak', due_day: '2026-11-01' })).error === 'bad_input', 'O‘tib ketgan sana bilan buyurtma ochilmaydi');
+  const oph = await api(SAR, 'photo_upload', { data: JPG, what: 'Zakaz: Gulnora' });
+  const o1 = await api(SAR, 'ord_create', { customer: 'Gulnora', phone: '+998 90 123 45 67', product: 'To‘y ko‘ylagi', measures: { 'Bo‘y': '165', Bel: '70', 'Ko‘krak': '' },
+    note: 'Yengi uzun', due_day: '2026-11-15', price: 100000, prepay: 30000, photo_id: oph.id, rid: rid() });
+  await new Promise((r) => setTimeout(r, 300));
+  check(/^Z-\d{4}$/.test(o1.code) && tgSent.some((m) => m.chat_id === OWNER && /Янги буюртма/.test(m.text || '') && /тасдиқланг/.test(m.text)), 'Buyurtma ochildi, rahbarga «narxni tasdiqlang» xabari', o1);
+  let od = await api(SAR, 'ord_detail', { id: o1.id });
+  check(od.status === 'new' && od.measures['Bel'] === '70' && !('Ko‘krak' in od.measures) && od.paid === 30000 && od.debt === 70000 && od.price_ok === false, 'O‘lcham, oldindan to‘lov 30 000, qarz 70 000; narx hali tasdiqlanmagan', od);
+  check((await api(OWNER, 'r_home')).todo.ord_price === 1, 'Rahbar bosh ekranida «нарх тасдиқлаш»');
+  await api(OWNER, 'ord_price', { id: o1.id, price: 100000, rid: rid() });
+  await api(OWNER, 'ord_rates_set', { bichish: 20000, tikish: 20000, rid: rid() });
+  check((await raw(NOD, 'ord_detail', { id: o1.id })).status === 403, 'Tikuvchi o‘ziga berilmagan buyurtmani ko‘rmaydi');
+  await api(SAR, 'ord_cut', { id: o1.id, rid: rid() });
+  const ovc = await api(SAR, 'voice_upload', { data: 'data:audio/webm;base64,' + Buffer.alloc(700, 5).toString('base64'), mime: 'audio/webm' });
+  await api(SAR, 'ord_give', { id: o1.id, sewer_id: nodId, note: 'Yoqasi tik', voice_id: ovc.id, rid: rid() });
+  await new Promise((r) => setTimeout(r, 400));
+  const om = tgSent.find((m) => m._method === 'sendPhoto' && m.chat_id === NOD && /Z-/.test(m.caption || ''));
+  check(om && /Bel: 70/.test(om.caption) && /Yoqasi tik/.test(om.caption), 'Tikuvchiga rasm, o‘lchamlar va izoh bilan bordi', om);
+  const nl = await api(NOD, 'ord_list', {});
+  const nv = nl.rows.find((x) => x.id === o1.id);
+  check(nv && nv.phone === undefined && nv.price === undefined && nv.paid === undefined, 'Tikuvchi mijoz telefoni va pulini ko‘rmaydi', nv);
+  check((await getMedia(NOD, 'voice_get', ovc.id)).status === 200 && (await getMedia(NOD, 'photo_get', oph.id)).status === 200 && (await getMedia(DIL, 'photo_get', oph.id)).status === 403, 'Buyurtma rasmi/ovozini shu tikuvchi ochadi, begona ocha olmaydi');
+  await api(NOD, 'ord_accept', { id: o1.id, rid: rid() });
+  // Eslatmalar: muddatdan 2 kun oldin bichuvchi va tikuvchiga, takrorlanmaydi
+  NOW = Date.parse('2026-11-13T03:00:00Z');
+  const oc1 = await (await fetch(`${BASE}/__test/cron`, { method: 'POST', headers: { 'x-test-now': String(NOW) } })).json();
+  const oc2 = await (await fetch(`${BASE}/__test/cron`, { method: 'POST', headers: { 'x-test-now': String(NOW) } })).json();
+  check(oc1.result.filter((x) => x.order === o1.id && x.kind === 'soon').length === 2 && !oc2.result.some((x) => x.order), '2 kun qolganda bichuvchi va tikuvchiga eslatma, qayta yuborilmaydi', oc1);
+  await api(NOD, 'ord_sewn', { id: o1.id, rid: rid() });
+  await api(SAR, 'ord_receive', { id: o1.id, rid: rid() });
+  // Kiyib ko'rish: tuzatish kerak (tikuvchida), yangi sana
+  check((await raw(SAR, 'ord_fit', { id: o1.id, result: 'fix', fix_by: 'sewer', due_day: '2026-11-18' })).error === 'need_reason', 'Tuzatishga sababsiz yuborilmaydi');
+  await api(SAR, 'ord_fit', { id: o1.id, result: 'fix', fix_by: 'sewer', note: 'Beli tor', due_day: '2026-11-18', rid: rid() });
+  od = await api(SAR, 'ord_detail', { id: o1.id });
+  check(od.status === 'fixing' && od.fix_by === 'sewer' && od.due_day === '2026-11-18' && od.fixes === 1 && (await api(NOD, 'ord_list', { tab: 'fix' })).rows.length === 1, 'Tuzatishga qaytdi: tikuvchida, yangi muddat, tarixda sabab');
+  await api(NOD, 'ord_sewn', { id: o1.id, rid: rid() });
+  await api(SAR, 'ord_receive', { id: o1.id, rid: rid() });
+  const zN = (await api(OWNER, 'payslip', { user_id: nodId, from: '2026-11-01', to: '2026-11-30' })).groups.filter((g) => g.zakaz);
+  const zS = (await api(OWNER, 'payslip', { user_id: sarU, from: '2026-11-01', to: '2026-11-30' })).groups.filter((g) => g.zakaz);
+  check(zN.length === 1 && zN[0].amount === 20000 && zS.length === 1 && zS[0].amount === 20000, 'Zakaz haqi alohida qatorda: bichuvchiga 20 000, tikuvchiga 20 000 (tuzatish uchun qayta to‘lanmaydi)', { zN, zS });
+  check((await raw(SAR, 'ord_fit', { id: o1.id, result: 'ok', pay: 80000 })).error === 'overpay', 'Narxdan ortiq to‘lov yozilmaydi');
+  const fit = await api(SAR, 'ord_fit', { id: o1.id, result: 'ok', pay: 50000, rid: rid() });
+  check(fit.debt === 20000, 'Topshirildi, mijoz qarzi 20 000', fit);
+  let sm = await api(OWNER, 'ord_summary');
+  const sc = sm.cutters.find((c) => c.id === sarU);
+  check(sm.debt_sum === 20000 && sc && sc.held === 80000, 'Rahbar: mijozlar qarzi 20 000, bichuvchida 80 000 naqd', sm);
+  check((await raw(SAR, 'cash_give', { amount: 90000 })).error === 'cash_too_much', 'Qo‘lidagidan ko‘p topshirib bo‘lmaydi');
+  const h1 = await api(SAR, 'cash_give', { amount: 50000, rid: rid() });
+  let rvS = await api(OWNER, 'rk_view', { user_id: sarU });
+  check(rvS.live.blockers.includes('cash_open'), 'Topshirish tasdiqlanmaguncha oylik hisob yuborilmaydi');
+  await api(OWNER, 'cash_decide', { id: h1.id, ok: true, rid: rid() });
+  rvS = await api(OWNER, 'rk_view', { user_id: sarU });
+  check(rvS.live.cashHeld === 30000 && !rvS.live.blockers.includes('cash_open'), 'Topshirilmagan 30 000 oylik hisobda ushlanadi', rvS.live);
+  if (!rvS.live.blockers.length) {
+    const sS = await api(OWNER, 'rk_send', { user_id: sarU, rid: rid() });
+    await api(SAR, 'rk_answer', { id: sS.id, agree: true, rid: rid() });
+    const after = await api(SAR, 'cash_my');
+    const rv3 = await api(SAR, 'rk_view', {});
+    check(after.held === 0 && rv3.live.cashHeld === 0 && rv3.live.total === sS.total, 'Tasdiqdan keyin pul ushlandi, qayta ushlanmaydi', { after, live: rv3.live.total, sent: sS.total });
+  } else check(false, 'Bichuvchi hisobida boshqa to‘siq', rvS.live.blockers);
+  // Mijoz olmadi → rahbar qarori
+  const o2 = await api(SAR, 'ord_create', { customer: 'Zarina', product: 'Xalat', due_day: '2026-11-20', rid: rid() });
+  await api(SAR, 'ord_give', { id: o2.id, sewer_id: nodId, rid: rid() });
+  await api(NOD, 'ord_accept', { id: o2.id, rid: rid() });
+  await api(NOD, 'ord_sewn', { id: o2.id, rid: rid() });
+  await api(SAR, 'ord_receive', { id: o2.id, rid: rid() });
+  await api(SAR, 'ord_fit', { id: o2.id, result: 'left', note: 'yoqmadi', rid: rid() });
+  check((await api(OWNER, 'r_home')).todo.ord_left === 1, 'Olib ketilmagan buyurtma rahbarga ko‘rinadi');
+  check((await raw(OWNER, 'ord_left_decide', { id: o2.id, decision: 'close' })).error === 'need_reason', 'Yopish uchun izoh kerak');
+  await api(OWNER, 'ord_left_decide', { id: o2.id, decision: 'close', note: 'sotuvga chiqarildi', rid: rid() });
+  const lst = await api(SAR, 'ord_list', { tab: 'left' });
+  check(lst.rows[0].status === 'closed' && lst.counts.done === 1, 'Bo‘limlar bo‘yicha sanoq to‘g‘ri', lst.counts);
+  check((await raw(DIL, 'ord_detail', { id: o1.id })).status === 403 && (await raw(NOD, 'ord_pay', { id: o1.id, amount: 1 })).status === 403, 'Begona xodim va tikuvchi mijoz pulini yoza olmaydi');
+
+  test(18, 'Qo‘shimcha: murojaat — ruxsat so‘rash (kunlar bilan), muammo yozish, faqat rahbar ko‘radi');
+  NOW = Date.parse('2026-11-20T04:00:00Z');
+  check((await raw(NOD, 'mj_create', { kind: 'leave', from_day: '2026-11-21', to_day: '2026-11-23' })).error === 'need_reason', 'Sababsiz (yozma ham, ovoz ham yo‘q) yuborilmaydi');
+  check((await raw(NOD, 'mj_create', { kind: 'leave', text: 'x', from_day: '2026-11-19', to_day: '2026-11-19' })).error === 'bad_input', 'O‘tgan kunga ruxsat so‘ralmaydi');
+  const mjv = await api(NOD, 'voice_upload', { data: 'data:audio/webm;base64,' + Buffer.alloc(700, 9).toString('base64'), mime: 'audio/webm', sec: 'murojaat' });
+  const m1 = await api(NOD, 'mj_create', { kind: 'leave', text: 'To‘yga boraman', voice_id: mjv.id, from_day: '2026-11-21', to_day: '2026-11-23', rid: rid() });
+  await new Promise((r) => setTimeout(r, 400));
+  check(tgSent.some((m) => m.chat_id === OWNER && /рухсат сўради: 21\.11–23\.11/.test(m.text || m.caption || '')) && tgSent.some((m) => m._method === 'sendDocument' && m.chat_id === OWNER && /VOICE/.test(m.document)), 'Rahbarga Telegram’da xabar va ovozli sabab bordi');
+  const mph = await api(NOD, 'photo_upload', { data: JPG, what: 'yeng', sec: 'murojaat' });
+  const m2 = await api(NOD, 'mj_create', { kind: 'shortage', text: '10 tadan 1 tasida yeng yo‘q', ref: 'P-0001', photo_id: mph.id, rid: rid() });
+  check((await api(OWNER, 'r_home')).todo.mj === 2, 'Rahbar bosh ekranida «Мурожаатлар: 2»');
+  check((await raw(DIL, 'mj_list', {})).status === 403 && (await getMedia(DIL, 'photo_get', mph.id)).status === 403 && (await getMedia(OWNER, 'photo_get', mph.id)).status === 200, 'Boshqa xodim murojaatni ham, rasmini ham ko‘rmaydi');
+  check((await raw(OWNER, 'mj_answer', { id: m1.id })).error === 'bad_input' && (await raw(OWNER, 'mj_answer', { id: m2.id })).error === 'need_reason', 'Ruxsatga qaror, muammoga javob matni shart');
+  await api(OWNER, 'mj_answer', { id: m1.id, decision: 'approve', answer: 'Mayli, tabriklaymiz', rid: rid() });
+  await api(OWNER, 'mj_answer', { id: m2.id, answer: 'Bichuvchiga qayta bichtiraman', rid: rid() });
+  await new Promise((r) => setTimeout(r, 300));
+  const my = await api(NOD, 'mj_my');
+  check(my.find((a) => a.id === m1.id).status === 'approved' && my.find((a) => a.id === m2.id).answer === 'Bichuvchiga qayta bichtiraman' && tgSent.some((m) => m.chat_id === NOD && /ruxsat berdi: 21\.11–23\.11/.test(m.text || '')), 'Xodim javobni ilovada va Telegram’da ko‘radi');
+  NOW = Date.parse('2026-11-22T05:00:00Z');
+  const hm22 = await api(OWNER, 'r_home');
+  check(hm22.att.leave.includes('Nodira Karimova') && !hm22.att.absent.includes('Nodira Karimova'), 'Ruxsatli kuni «kelmadi» emas, «ruxsatda» bo‘lib ko‘rinadi');
+  const ar = await api(OWNER, 'att_report', { from: '2026-11-01', to: '2026-11-30', user_id: nodId });
+  check(ar.users[0].leave === 3, 'Davomat hisobotida: ruxsatli 3 kun', ar.users[0]);
+  NOW = SAVE_NOW;
+
   const snap = { staff: (await api(OWNER, 'staff_list')).users.length, audit: (await api(OWNER, 'audit_list', { limit: 500 })).length, payable: (await api(OWNER, 'payslip', { user_id: ruxId, from: '2026-11-01', to: '2026-11-30' })).now };
   const fs = await import('node:fs');
   fs.writeFileSync(new URL('./.snapshot.json', import.meta.url), JSON.stringify(snap));
