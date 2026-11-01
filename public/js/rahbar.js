@@ -330,12 +330,86 @@ async function settings() {
   <button class="big" data-act="export"><span class="ic">💾</span><span>Захира нусха<small>Бутун база ботга файл қилиб юборилади</small></span></button></div>`;
 }
 
+// Аудит ёзувларини одам тушунадиган матнга ўгириш. Янги амал қўшилса, шу рўйхатга бир қатор қўшилади.
+const AUD = {
+  owner_registered: ['👑', 'Раҳбар рўйхатдан ўтди'], request_created: ['📝', 'Янги ходим сўрови'], request_resent: ['📝', 'Сўров қайта юборилди'],
+  profile_filled: ['📝', 'Маълумотлар тўлдирилди'], request_approved: ['✅', 'Ходим тасдиқланди'], request_rejected: ['⛔', 'Сўров рад этилди'],
+  user_deactivated: ['🚪', 'Ходим фаолсизлантирилди'], user_reactivated: ['🔁', 'Ходим қайта фаоллаштирилди'], inspect_right: ['🔎', 'Текшириш ваколати ўзгарди'],
+  rahbar_added: ['👑', 'Янги раҳбар қўшилди'], settings_changed: ['⚙️', 'Созламалар ўзгартирилди'], catalog_added: ['➕', 'Каталогга қўшилди'],
+  rate_added: ['💲', 'Тариф белгиланди'], earning_rate_filled: ['💲', 'Иш ҳақига тариф қўйилди'], export: ['💾', 'Захира нусха олинди'],
+  bio_enrolled: ['🔐', 'Биометрика уланди'], bio_reenrolled: ['🔐', 'Биометрика қайта уланди'],
+  att_exception_requested: ['🕒', 'Давомат истисноси сўралди'], att_exception_approved: ['🕒', 'Давомат истисноси тасдиқланди'], att_exception_rejected: ['🕒', 'Давомат истисноси рад этилди'],
+  batch_created: ['📦', 'Янги партия очилди'], cut_added: ['✂︎', 'Бичим қўшилди'], opening_added: ['📦', 'Бошланғич қолдиқ киритилди'],
+  transfer_created: ['➡️', 'Иш берилди'], transfer_cancelled: ['↩️', 'Иш бериш бекор қилинди'], transfer_accepted: ['✅', 'Иш қабул қилинди'],
+  transfer_disputed: ['⚠️', 'Иш беришда тафовут'], transfer_resolved: ['✔️', 'Тафовут ҳал қилинди'],
+  submitted: ['📤', 'Тикилган иш топширилди'], inspected: ['🔎', 'Иш текширилди'], writeoff: ['🗑', 'Ҳисобдан чиқарилди'],
+  takeaway_created: ['🛍', 'Корхонадан олинган нарса ёзилди'], takeaway_priced: ['💲', 'Олинган нарсага нарх қўйилди'], takeaway_agreed: ['✅', 'Ходим олинган нарсани тасдиқлади'],
+  takeaway_disputed: ['⚠️', 'Ходим олинган нарсага эътироз қилди'], takeaway_cancelled: ['↩️', 'Олинган нарса бекор қилинди'], takeaway_settled: ['💵', 'Олинган нарса учун ҳисоблашилди'],
+  payment_created: ['💵', 'Пул берилди'], payment_confirmed: ['✅', 'Ходим пулни олганини тасдиқлади'], payment_disputed: ['⚠️', 'Ходим тўловда тафовут ёзди'],
+  payment_cancelled: ['↩️', 'Тўлов бекор қилинди'], payment_reverse_requested: ['↩️', 'Тўловни бекор қилиш сўралди'], payment_reversed: ['↩️', 'Тўлов бекор қилинди (ходим рози)'],
+  payment_reverse_refused: ['⚠️', 'Ходим тўловни бекор қилишга рози эмас'],
+  adjustment_created: ['🧾', 'Тузатиш киритилди'], adjustment_confirmed: ['✅', 'Ходим тузатишни тасдиқлади'], adjustment_disputed: ['⚠️', 'Ходим тузатишга эътироз қилди'],
+  adjustment_cancelled: ['↩️', 'Тузатиш бекор қилинди'], period_closed: ['🔒', 'Давр ёпилди'],
+};
+const SET_N = { radius: 'Ҳудуд радиуси (м)', max_acc: 'Жойлашув аниқлиги (м)', work_start: 'Иш бошланиши', work_end: 'Иш тугаши', break_start: 'Тушлик',
+  break_min: 'Тушлик (дақ.)', grace_min: 'Кечикишга рухсат (дақ.)', full_min: 'Тўлиқ кун (дақ.)', require_bio: 'Биометрика талаб қилинади' };
+const ST_N = { pending: 'кутилмоқда', active: 'фаол', inactive: 'фаол эмас', rejected: 'рад этилган', approved: 'тасдиқланган', confirmed: 'тасдиқланган',
+  disputed: 'баҳсли', cancelled: 'бекор', accepted: 'қабул қилинган', resolved: 'ҳал қилинган', agreed: 'келишилган' };
+const so = (n) => `${fmt(n)} сўм`;
+function audDetails(a) {
+  let af = {}, bf = {};
+  try { af = JSON.parse(a.after || 'null') || {}; } catch {}
+  try { bf = JSON.parse(a.before || 'null') || {}; } catch {}
+  const v = (x) => (Array.isArray(x) ? x[1] : x);
+  const out = [];
+  switch (a.action) {
+    case 'settings_changed':
+      if ('lat' in af || 'lng' in af) out.push('Корхона жойи белгиланди');
+      for (const [k, x] of Object.entries(af)) {
+        if (k === 'lat' || k === 'lng') continue;
+        const val2 = v(x);
+        out.push(`${SET_N[k] || k}: ${k === 'require_bio' ? (val2 === '1' ? 'ҳа' : 'йўқ') : esc(val2)}`);
+      }
+      break;
+    case 'owner_registered': case 'request_created': case 'request_approved': case 'rahbar_added':
+      if (af.role) out.push(`Лавозим: ${RN[af.role] || esc(af.role)}`); break;
+    case 'inspect_right': out.push(af.can_inspect ? 'Ваколат берилди' : 'Ваколат олинди'); break;
+    case 'catalog_added': if (af.name) out.push(esc(af.name)); break;
+    case 'rate_added': out.push(`${af.work === 'bichish' ? 'Бичиш' : 'Тикиш'}${af.model ? ' «' + esc(af.model) + '»' : ''}: ${so(af.price)} / дона${af.valid_from ? ', ' + dmy(af.valid_from) + ' дан' : ''}`); break;
+    case 'earning_rate_filled': if (af.amount != null) out.push(so(af.amount)); break;
+    case 'batch_created': if (af.code) out.push(`Партия ${esc(af.code)}`); break;
+    case 'transfer_created': if (af.items) out.push(`${fmt(af.items.reduce((t, i) => t + Number(i[1] || 0), 0))} дона`); if (af.code) out.push(esc(af.code)); break;
+    case 'submitted': if (af.qty) out.push(`${fmt(af.qty)} дона`); break;
+    case 'inspected': { const p2 = [af.accepted && `қабул ${fmt(af.accepted)}`, af.rework && `қайта ишлашга ${fmt(af.rework)}`, af.writeoff && `ҳисобдан чиқди ${fmt(af.writeoff)}`].filter(Boolean); if (p2.length) out.push(p2.join(', ') + ' дона'); break; }
+    case 'writeoff': if (af.qty) out.push(`${fmt(af.qty)} дона`); break;
+    case 'takeaway_created': out.push([esc(af.name || ''), af.qty ? fmt(af.qty) + ' дона' : ''].filter(Boolean).join(' · ')); break;
+    case 'takeaway_priced': case 'takeaway_agreed': if (af.amount != null) out.push(`${so(af.amount)}${af.pay_method ? ' · ' + (METHOD[af.pay_method] || '') : ''}`); break;
+    case 'takeaway_settled': if (af.amount != null) out.push(so(af.amount)); break;
+    case 'payment_created': out.push(`${so(af.amount)}${af.kind === 'avans' ? ' (аванс)' : ''}`); break;
+    case 'payment_disputed': if (af.got != null) out.push(`Ходим айтишича олгани: ${so(af.got)}`); break;
+    case 'adjustment_created': if (af.amount != null) out.push(so(af.amount)); break;
+    case 'period_closed': if (af.from) out.push(`${dmy(af.from)} – ${dmy(af.to)}`); break;
+    case 'export': if (af.tables) out.push(`${af.tables} та жадвал`); break;
+    default:
+      if (!AUD[a.action] && (bf.status || af.status)) out.push(`${ST_N[bf.status] || ''} → ${ST_N[af.status] || ''}`);
+  }
+  return out.filter(Boolean).join(' · ');
+}
+
 async function audit() {
   top('Аудит');
   const rows = await api('audit_list', { limit: 200 });
+  const who = (a) => nm(a) || 'Тизим';
+  const subj = (a) => { const s = `${a.s_first || ''} ${a.s_last || ''}`.trim(); return s && s !== nm(a) ? s : ''; };
   return `${backBtn}<h1 class="page">Аудит журнали</h1>
-  <div class="list">${rows.map((a) => `<div class="li"><div class="grow"><b>${esc(a.action)}</b> · ${esc(a.entity || '')} ${esc(a.entity_id || '')}<div class="sub">${dt(a.at)} · ${esc(nm(a) || 'тизим')}${a.reason ? ' · сабаб: ' + esc(a.reason) : ''}</div>
-    ${a.before || a.after ? `<div class="mono" style="word-break:break-all">${a.before ? esc(a.before) + ' → ' : ''}${esc(a.after || '')}</div>` : ''}</div></div>`).join('')}</div>`;
+  <p class="hint">Ким, қачон, нима қилгани. Бу ёзувларни ўчириб ёки ўзгартириб бўлмайди.</p>
+  ${rows.length ? `<div class="list">${rows.map((a) => {
+    const [ic, title] = AUD[a.action] || ['•', a.action];
+    const d = audDetails(a), s = subj(a);
+    return `<div class="li"><div class="ava" style="background:transparent;font-size:20px">${ic}</div><div class="grow"><b>${esc(title)}</b>${s ? ` · ${esc(s)}` : ''}
+      ${d ? `<div>${d}</div>` : ''}
+      <div class="sub">${dt(a.at)} · ${esc(who(a))}${a.reason ? ' · Сабаб: «' + esc(a.reason) + '»' : ''}</div></div></div>`;
+  }).join('')}</div>` : '<p class="hint">Ҳали ёзув йўқ.</p>'}`;
 }
 
 registerScreens({ r_home: home, r_staff: staff, r_prod: prod, r_money: money, r_set: settings, r_insp: insp, r_disputes: disputes, r_batches: batches, r_batch: batch,

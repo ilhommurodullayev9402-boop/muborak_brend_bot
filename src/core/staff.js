@@ -288,7 +288,19 @@ export const actions = {
     auth: 'rahbar',
     fn(ctx, b) {
       const lim = Math.min(Number(b.limit) || 100, 500);
-      return ctx.db.all(`SELECT a.*, u.first_name, u.last_name FROM audit a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT ?`, lim);
+      // Кимга тегишли: амал қайси ходимга таъсир қилганини ҳам қайтарамиз (экранда одам номи кўрсатилади).
+      return ctx.db.all(`SELECT a.*, u.first_name, u.last_name, s.first_name AS s_first, s.last_name AS s_last FROM audit a
+        LEFT JOIN users u ON u.id=a.actor_id
+        LEFT JOIN users s ON s.id = CASE a.entity
+          WHEN 'user' THEN a.entity_id
+          WHEN 'payment' THEN (SELECT user_id FROM payments WHERE id=a.entity_id)
+          WHEN 'adjustment' THEN (SELECT user_id FROM adjustments WHERE id=a.entity_id)
+          WHEN 'takeaway' THEN (SELECT user_id FROM takeaways WHERE id=a.entity_id)
+          WHEN 'att_exc' THEN (SELECT user_id FROM att_exc WHERE id=a.entity_id)
+          WHEN 'transfer' THEN (SELECT to_id FROM transfers WHERE id=a.entity_id)
+          WHEN 'submission' THEN (SELECT sewer_id FROM submissions WHERE id=a.entity_id)
+          ELSE NULL END
+        ORDER BY a.id DESC LIMIT ?`, lim);
     },
   },
 
