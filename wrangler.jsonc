@@ -1,0 +1,15 @@
+{
+  // MUBORAK BREND — Telegram Mini App serveri
+  "name": "muborak-brend",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-09-01",
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "durable_objects": { "bindings": [{ "name": "KORXONA", "class_name": "Korxona" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Korxona"] }],
+  // Har kuni 03:00 UTC (Toshkent 08:00) — tug'ilgan kun eslatmalari
+  "triggers": { "crons": ["0 3 * * *"] },
+  "observability": { "enabled": true },
+  // Panelda kiritilgan sozlamalar har yangilanishda o'chib ketmasin
+  "keep_vars": true
+  // Maxfiy sozlamalar Cloudflare panelida kiritiladi: BOT_TOKEN (Secret), OWNER_TG_ID (Text)
+}
