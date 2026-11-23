@@ -69,10 +69,30 @@ Bitta «o‘tish kuni» tanlang (masalan, oy boshi). Shu kungacha bo‘lganini q
 - **Pul**: har xodim uchun bitta summa — Пул → xodim → «Тузатиш киритиш» (boshlang‘ich qoldiq). Xodim tasdiqlaydi.
 - Qoida: tikuvchi qo‘lidagi, hali topshirmagan ish uchun pulni boshlang‘ich summaga **qo‘shmang** — aks holda ikki marta to‘lanadi.
 
+## 6a. Haftalik ZIP arxiv
+Har dushanba 00:05 da (yakshanba tugashi bilan) o‘tgan hafta (dushanba–yakshanba) arxivi yopiq kanalga va ikkala rahbarga keladi.
+Ichida: `hisobot/` (Excel’da ochiladigan jadvallar: ish haqi, davomat, bichim, pul, avans, olganlar, buyurtmalar, murojaatlar, audit),
+`rasmlar/` va `ovozlar/` (bo‘lim bo‘yicha, nomi: sana_vaqt_kod_xodim), `baza/toliq_zaxira.json`. 45 MB dan katta bo‘lsa qismlarga bo‘linadi.
+Созламалар → «Архивни ҳозир юбориш» — oxirgi 7 kun arxivini darhol yuboradi (sinash uchun).
+
+## 6b. Xato yoki sinov yozuvini hisobdan chiqarish
+Butun bazani tozalash yo‘q. Ишлаб чиқариш → «Бичимлар» → yozuvni oching → «Ҳисобдан чиқариш…». Avval ta’siri ko‘rsatiladi
+(qoldiq kimda, bog‘liq topshirishlar, qaytariladigan ish haqi). Sabab yoziladi va tasdiq belgisi qo‘yiladi. Yozuv o‘chirilmaydi,
+tarixda «ҳисобдан чиқарилган» bo‘lib qoladi; haq teskari qator bilan bugungi sanada qaytariladi. Bog‘liqlik nomuvofiq bo‘lsa, tizim rad etadi.
+
+## 6c. Bichim yozuvlari, «Изменить», yordamchi, fason tariflari
+- Har bir «Bichdim» alohida yozuv (o‘z partiya kodi bilan). Bichuvchi fasonni rahbar ro‘yxatidan tanlaydi.
+- «Изменить»: razmer bo‘yicha sonni (0 gacha) tuzatish, sabab majburiy. Tikuvchiga berilgandan pastga tushirib bo‘lmaydi — bog‘liq topshirish ko‘rsatiladi.
+  Tarixda eski/yangi qiymat, sabab, kim va qachon. Qoldiq va ish haqi farq qatori bilan yangilanadi.
+- Yordamchi: «Yordamchi qo‘shish» → tasdiqlangan tikuvchi, ulush donada (jami tayyordan oshmaydi). 100 dona, ulush 20 → bichuvchiga 80, yordamchiga 20 («Bichishga yordam»).
+- Tariflar (Пул → Тарифлар): bichish barcha fasonlar uchun bitta (boshlanishi 8 000), yordamchi tarifi alohida, fason bo‘yicha tikish tarifi va alohida qo‘shimcha haq (aplikatsiya, tosh).
+  Yangi bichimlarda bichish haqi «Bichdim»da yoziladi; eski partiyalar avvalgidek (tikuvchi qabul qilganda).
+- Zaxirani tekshirish: `node tools/zaxira.mjs zaxira.json --old <eski src>` — JSON’dan bazani tiklaydi, nusxada migratsiya qilib hisoblarni solishtiradi.
+
 ## 7. Kod tuzilishi (qo‘shimchalar uchun)
 
 - `src/schema.js` — baza sxemasi va migratsiyalar (yangi o‘zgarish = ro‘yxat oxiriga yangi element).
-- `src/core/*.js` — har bo‘lim alohida: `staff`, `attendance`, `production`, `money`, `oylik` (olganlar, avans, oylik hisob), `orders` (buyurtma/zakaz), `murojaat`, `photos`, `reports`, `voice`. Yangi amal = shu fayllardan biriga yangi kalit.
+- `src/core/*.js` — har bo‘lim alohida: `bichim` (bichim yozuvlari, tariflar), `staff`, `attendance`, `production`, `money`, `oylik` (olganlar, avans, oylik hisob), `orders` (buyurtma/zakaz), `murojaat`, `photos`, `reports`, `voice`. Yangi amal = shu fayllardan biriga yangi kalit.
 - `src/worker.js` — Telegram imzosi, bildirishnomalar, ulanish. `src/auth.js` — imzo tekshiruvi.
 - `public/js/xodim.js` — bichuvchi/tikuvchi ekranlari (lotin); `public/js/rahbar.js` — rahbar ekranlari (kirill); `public/js/buyurtma.js` — buyurtma ekranlari (ikkala yozuvda).
 - `test/` — qabul sinovlari.

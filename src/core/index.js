@@ -10,9 +10,11 @@ import { actions as photos } from './photos.js';
 import { actions as oylik } from './oylik.js';
 import { actions as orders, orderTick } from './orders.js';
 import { actions as murojaat } from './murojaat.js';
+import { actions as arxiv } from './arxiv.js';
+import { actions as bichim } from './bichim.js';
 import { migrate } from '../schema.js';
 
-export const ACTIONS = { ...staff, ...attendance, ...production, ...money, ...reports, ...voice, ...photos, ...oylik, ...orders, ...murojaat };
+export const ACTIONS = { ...staff, ...attendance, ...production, ...money, ...reports, ...voice, ...photos, ...oylik, ...orders, ...murojaat, ...arxiv, ...bichim };
 export { AppError, migrate };
 
 function authorize(auth, me) {

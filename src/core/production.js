@@ -1,6 +1,7 @@
 // Partiyalar, bichim, bichuvchidan tikuvchiga topshirish, tikish, tayyor deb topshirish va tekshiruv.
 import { attachPhoto, attachVoice } from './photos.js';
 import { AppError, needInt, needText, optText, fullName, lineLabel, tHM } from './base.js';
+import { earnPartialDone } from './bichim.js';
 
 const SIZE_RE = /^[0-9A-Za-z\-\/ ]{1,12}$/;
 
@@ -47,14 +48,19 @@ function newBatch(ctx, b, opening) {
   return { id: r.id, code };
 }
 
+// Eski tartib (haq tikuvchi qabul qilganda): har bir bichish amali baribir alohida yozuv (cuts) bo'ladi
 function addCut(ctx, batchId, lines) {
   let ready = 0, partial = 0;
+  const b = ctx.db.one('SELECT cutter_id FROM batches WHERE id=?', batchId);
+  const c = ctx.db.one(`INSERT INTO cuts(batch_id,cutter_id,day,at,status,legacy,created_by) VALUES(?,?,?,?,'active',0,?) RETURNING id`,
+    batchId, b.cutter_id, ctx.day, ctx.at, ctx.me.id);
   for (const l of lines) {
     const lid = lineFor(ctx, batchId, l.size);
-    if (l.ready) { ctx.move(lid, l.ready, null, 0, 'free', 0, 'cut_ready', 'b:' + batchId); ready += l.ready; }
-    if (l.partial) { ctx.move(lid, l.partial, null, 0, 'partial', 0, 'cut_partial', 'b:' + batchId); partial += l.partial; }
+    ctx.db.run('INSERT INTO cut_lines(cut_id,line_id,ready,partial) VALUES(?,?,?,?)', c.id, lid, l.ready, l.partial);
+    if (l.ready) { ctx.move(lid, l.ready, null, 0, 'free', 0, 'cut_ready', 'c:' + c.id); ready += l.ready; }
+    if (l.partial) { ctx.move(lid, l.partial, null, 0, 'partial', 0, 'cut_partial', 'c:' + c.id); partial += l.partial; }
   }
-  return { ready, partial };
+  return { ready, partial, cut_id: c.id };
 }
 
 function batchView(ctx, batchId, withHolders) {
@@ -69,7 +75,8 @@ function batchView(ctx, batchId, withHolders) {
     const lb = bals.filter((x) => x.line_id === l.id);
     const st = {};
     for (const x of lb) st[x.state] = (st[x.state] || 0) + x.qty;
-    const cut = ctx.db.one("SELECT COALESCE(SUM(CASE WHEN kind IN('cut_ready','partial_done','opening') THEN qty END),0) ready FROM moves WHERE line_id=?", l.id);
+    const cut = ctx.db.one(`SELECT COALESCE(SUM(CASE WHEN kind IN('cut_ready','partial_done','opening') THEN qty
+      WHEN kind IN('cut_fix','cut_void') AND to_state='free' THEN qty WHEN kind IN('cut_fix','cut_void') AND from_state='free' THEN -qty END),0) ready FROM moves WHERE line_id=?`, l.id);
     const row = { line_id: l.id, size: l.size, states: st, ready_total: cut.ready };
     if (withHolders) row.holders = lb.filter((x) => x.holder).map((x) => ({ state: x.state, holder: x.holder, name: `${x.first_name} ${x.last_name}`, qty: x.qty }));
     out.lines.push(row);
@@ -94,7 +101,7 @@ function transferView(ctx, t) {
 
 function earnCutter(ctx, item) {
   const li = ctx.lineInfo(item.line_id);
-  if (li.opening || !li.cutter_id) return;
+  if (li.opening || !li.cutter_id || li.pay_on_cut) return; // yangi tartibda haq «Bichdim»da yozilgan
   const cutter = ctx.user(li.cutter_id);
   if (!cutter || cutter.role !== 'bichuvchi') return;
   ctx.earn(cutter.id, 'bichish', 'tr:' + item.id, item.line_id, item.accepted);
@@ -132,6 +139,8 @@ export const actions = {
     fn(ctx, b) {
       const batch = ctx.db.one('SELECT * FROM batches WHERE id=?', needInt(b.batch_id, 'batch_id', 1));
       if (!batch || batch.opening) throw new AppError('not_found');
+      // Yangi tartibda har bir «Bichdim» o'z partiyasi bilan alohida yoziladi
+      if (batch.pay_on_cut) throw new AppError('use_new_cut');
       if (ctx.me.role !== 'rahbar' && batch.cutter_id !== ctx.me.id) throw new AppError('forbidden', {}, 403);
       const lines = normLines(b.lines);
       if (b.photo_id) ctx.db.run('UPDATE batches SET photo_id=? WHERE id=?', attachPhoto(ctx, b.photo_id), batch.id);
@@ -147,7 +156,8 @@ export const actions = {
       const li = lineOk(ctx, b.line_id);
       if (ctx.me.role !== 'rahbar' && li.cutter_id !== ctx.me.id) throw new AppError('forbidden', {}, 403);
       const qty = needInt(b.qty, 'qty', 1, 100000);
-      ctx.move(li.line_id, qty, 'partial', 0, 'free', 0, 'partial_done', 'b:' + li.batch_id);
+      const mid = ctx.move(li.line_id, qty, 'partial', 0, 'free', 0, 'partial_done', 'b:' + li.batch_id);
+      earnPartialDone(ctx, li, qty, mid);
       return { ok: true };
     },
   },
@@ -181,7 +191,7 @@ export const actions = {
         ORDER BY b.id DESC LIMIT 60`, ...(ctx.me.role === 'rahbar' ? [] : [me]), ctx.day).map((r) => r.id);
       const batches = ids.map((id) => batchView(ctx, id, false));
       const today = ctx.db.one(`SELECT
-        COALESCE(SUM(CASE WHEN m.kind IN('cut_ready','partial_done') THEN m.qty END),0) ready,
+        COALESCE(SUM(CASE WHEN m.kind IN('cut_ready','partial_done') THEN m.qty WHEN m.kind='cut_fix' AND m.to_state='free' THEN m.qty WHEN m.kind='cut_fix' AND m.from_state='free' THEN -m.qty END),0) ready,
         COALESCE(SUM(CASE WHEN m.kind='cut_partial' THEN m.qty END),0) partial,
         COALESCE(SUM(CASE WHEN m.kind='transfer_reserve' THEN m.qty END),0) given
         FROM moves m WHERE m.day=? AND m.actor_id=?`, ctx.day, me);

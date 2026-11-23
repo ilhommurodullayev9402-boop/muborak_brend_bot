@@ -3,7 +3,12 @@ import { tg, initData, api, act, esc, setMain, setTop, brandTop, show, registerS
 
 if (tg) {
   try { tg.ready(); tg.expand(); } catch {}
-  const setTheme = () => document.documentElement.setAttribute('data-theme', tg.colorScheme === 'dark' ? 'dark' : 'light');
+  const setTheme = () => {
+    const dark = tg.colorScheme === 'dark';
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    // Telegram oynasining yuqori va orqa rangini ilova foniga moslash (faqat ko'rinish)
+    try { tg.setHeaderColor(dark ? '#0C1C15' : '#F7F2E7'); tg.setBackgroundColor(dark ? '#0C1C15' : '#F7F2E7'); } catch {}
+  };
   setTheme();
   try { tg.onEvent('themeChanged', setTheme); } catch {}
 }
@@ -13,6 +18,11 @@ const ROLE = {
   bichuvchi: { cyr: 'Бичувчи', lat: 'Bichuvchi', ic: '✂︎' },
   tikuvchi: { cyr: 'Тикувчи', lat: 'Tikuvchi', ic: '🧵' },
 };
+const ROLE_SVG = {
+  rahbar: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 11l5.5 5L16 7l5.5 9L27 11l-2.5 12h-17z"/><circle cx="5" cy="10" r="2"/><circle cx="16" cy="6" r="2"/><circle cx="27" cy="10" r="2"/><rect x="7" y="24.5" width="18" height="3" rx="1"/></svg>',
+  bichuvchi: '<svg viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke-width="2.4" stroke-linecap="round"><circle cx="9" cy="24" r="4"/><circle cx="23" cy="24" r="4"/><path d="M11.5 21L24 4M20.5 21L8 4"/></svg>',
+  tikuvchi: '<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 22V11c0-2.8 2-4.5 4.5-4.5H24c2.5 0 4 1.7 4 4.2V14h-3.5v-2c0-.8-.5-1.2-1.2-1.2H13c-1.2 0-1.8.8-1.8 1.8V22z"/><rect x="4" y="22" width="25" height="4" rx="1.2"/><rect x="23.5" y="14" width="3" height="5" rx=".6"/><path d="M25 19v3" stroke-width="1.4"/><rect x="17" y="3" width="4" height="3.5" rx=".8"/><circle cx="9.4" cy="12.5" r="1.3" class="h"/></svg>',
+};
 export const roleName = (r, lang) => (ROLE[r] ? ROLE[r][lang] : r);
 const MONTHS = { lat: ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentabr', 'oktabr', 'noyabr', 'dekabr'],
   cyr: ['январ', 'феврал', 'март', 'апрел', 'май', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'] };
@@ -21,10 +31,19 @@ function roleSelect() {
   setLang('lat');
   setTop('');
   document.getElementById('nav').hidden = true;
-  return `<div class="hero"><div class="mark">MB</div><h1>MUBORAK BREND</h1><p>Tikuvchilik korxonasi hisobi</p></div>
-  <button class="rolebtn lead" data-act="role" data-r="rahbar"><span class="ic">${ROLE.rahbar.ic}</span>Раҳбар</button>
-  <button class="rolebtn" data-act="role" data-r="bichuvchi"><span class="ic">${ROLE.bichuvchi.ic}</span>Bichuvchi</button>
-  <button class="rolebtn" data-act="role" data-r="tikuvchi"><span class="ic">${ROLE.tikuvchi.ic}</span>Tikuvchi</button>`;
+  const chev = '<svg class="chev" viewBox="0 0 12 20" aria-hidden="true"><path d="M2 2l8 8-8 8" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const btn = (r, label, lead) => `<button class="rolebtn${lead ? ' lead' : ''}" data-act="role" data-r="${r}"><span class="ic">${ROLE_SVG[r]}</span><span class="bar" aria-hidden="true"></span><span class="nm">${label}</span>${chev}</button>`;
+  return `<div class="welcome">
+  <div class="silk"><div class="badge"><img src="img/logo.jpg" alt="MB"></div>
+    <div class="wm">MUBORAK BREND</div>
+    <div class="tagl"><i></i><span>Tikuvchilik korxonasi hisobi</span><i></i></div></div>
+  <h1 class="hi">Xush kelibsiz</h1>
+  <p class="hisub">Ishni boshlash uchun rolingizni tanlang</p>
+  <div class="dia" aria-hidden="true"><i></i><b></b><i></i></div>
+  ${btn('rahbar', 'Раҳбар', true)}
+  ${btn('bichuvchi', 'Bichuvchi')}
+  ${btn('tikuvchi', 'Tikuvchi')}
+  <div class="foot"><i></i><span>@muborak_brend_bot</span><i></i></div></div>`;
 }
 
 function registerScreen({ role, auto, rejected, note }) {

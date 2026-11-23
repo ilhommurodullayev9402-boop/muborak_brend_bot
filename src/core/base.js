@@ -94,21 +94,39 @@ export class Ctx {
   }
   lineInfo(lineId) {
     return this.db.one(`SELECT l.id line_id, l.size, b.id batch_id, b.code, b.model, b.material, b.color, b.type_id, b.cutter_id, b.opening, b.photo_id,
-      c.name type_name FROM lines l JOIN batches b ON b.id=l.batch_id LEFT JOIN catalog c ON c.id=b.type_id WHERE l.id=?`, lineId);
+      b.fason_id, b.pay_on_cut, c.name type_name FROM lines l JOIN batches b ON b.id=l.batch_id LEFT JOIN catalog c ON c.id=b.type_id WHERE l.id=?`, lineId);
   }
   // Tarif: ish turi + mahsulot turi (+ model) + amal qilish sanasi. Topilmasa null — taxmin qilinmaydi.
   findRate(work, typeId, model, day) {
     return this.db.one(`SELECT * FROM rates WHERE work=? AND type_id=? AND (model='' OR lower(model)=lower(?)) AND valid_from<=?
       ORDER BY (model<>'') DESC, valid_from DESC, id DESC LIMIT 1`, work, typeId, model || '', day);
   }
+  // Fason tikish tarifi (asosiy narx + alohida qo'shimcha haq) shu kunga amal qiladigani
+  fasonRate(fasonId, day) {
+    if (!fasonId) return null;
+    return this.db.one('SELECT * FROM fason_rates WHERE fason_id=? AND valid_from<=? ORDER BY valid_from DESC, id DESC LIMIT 1', fasonId, day);
+  }
+  // Barcha fasonlar uchun yagona bichish / yordamchi bichish tarifi
+  flatRate(work, day) {
+    return this.db.one('SELECT * FROM flat_rates WHERE work=? AND valid_from<=? ORDER BY valid_from DESC, id DESC LIMIT 1', work, day);
+  }
+  // Ish uchun qo'llanadigan narx: { rate_id, price (jami dona narxi), extra (shundan qo'shimcha haq) } yoki null
+  priceFor(work, li, day) {
+    if (work === 'tikish' && li.fason_id) {
+      const fr = this.fasonRate(li.fason_id, day);
+      if (fr) return { rate_id: null, price: fr.sew_price + fr.extra_price, extra: fr.extra_price };
+    }
+    const r = this.findRate(work, li.type_id, li.model, day);
+    return r ? { rate_id: r.id, price: r.price, extra: null } : null;
+  }
   // Ishbay haq yozuvi. src noyob — bir ish uchun ikki marta yozilmaydi.
   earn(userId, work, src, lineId, qty) {
     if (!userId || qty <= 0) return;
     const li = this.lineInfo(lineId);
-    const rate = this.findRate(work, li.type_id, li.model, this.day);
-    this.db.run(`INSERT INTO earnings(user_id,work,src,line_id,qty,day,rate_id,price,amount,created_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(src) DO NOTHING`, userId, work, src, lineId, qty, this.day,
-      rate ? rate.id : null, rate ? rate.price : null, rate ? rate.price * qty : null, this.at);
+    const p = this.priceFor(work, li, this.day);
+    this.db.run(`INSERT INTO earnings(user_id,work,src,line_id,qty,day,rate_id,price,amount,created_at,extra)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(src) DO NOTHING`, userId, work, src, lineId, qty, this.day,
+      p ? p.rate_id : null, p ? p.price : null, p ? p.price * qty : null, this.at, p ? p.extra : null);
   }
 }
 

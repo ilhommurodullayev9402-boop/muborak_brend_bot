@@ -68,9 +68,9 @@ const fillReg = async (p, fn, ln, d, m, y) => {
   await p.selectOption('[name=bm]', String(m)); await p.fill('[name=by]', String(y));
 };
 // Rahbar ekranida lotin harflari bormi (ruxsat etilgan istisnolardan tashqari)
-const latinLeak = (t) => t.replace(/MUBORAK BREND|MB|Telegram ID|Telegram|Face ID|@userinfobot|JSON|PUL-\d+|P-\d+|T-\d+|«Pulni oldim»|Pulni oldim|[A-Z]-\d+/g, '')
+const latinLeak = (t) => t.replace(/MUBORAK BREND|MB|Telegram ID|Telegram|Face ID|@userinfobot|JSON|ZIP|PUL-\d+|P-\d+|T-\d+|«Pulni oldim»|Pulni oldim|[A-Z]-\d+/g, '')
   .split(/\s+/).filter((w) => /[a-z]{3,}/i.test(w));
-const cyrLeak = (t) => t.replace(/Раҳбар/g, '').split(/\s+/).filter((w) => /[Ѐ-ӿ]{2,}/.test(w));
+const cyrLeak = (t) => t.replace(/Раҳбар|Изменить/g, '').split(/\s+/).filter((w) => /[Ѐ-ӿ]{2,}/.test(w));
 
 // 1) Dadam — rahbar (kirill)
 const boss = await user(1000, 'Dad');
@@ -111,11 +111,18 @@ ok(!(await body(boss)).includes('Сўралган роль'), 'Ikkala so‘rov t
 // Tarif
 await tab(boss, 'Пул');
 await click(boss, 'Тарифлар');
-await click(boss, '+ Тариф қўшиш');
+ok(/Бичиш \(барча фасонлар\)[\s\S]*8 000/.test(await body(boss)), 'Bichish tarifi barcha fasonlar uchun 8 000');
+await click(boss, '+ Фасон');
 await click(boss, 'Ko‘ylak', { exact: true, wait: 100 });
-await boss.fill('[name=price]', '10000');
-await click(boss, 'Сақлаш', { exact: true, wait: 800 });
-ok((await body(boss)).includes('10 000 сўм'), 'Tikish tarifi qo‘shildi');
+await boss.fill('[name=fname]', 'Lola'); await boss.fill('[name=sew]', '10000');
+await click(boss, 'Қўшиш', { exact: true, wait: 800 });
+ok((await body(boss)).includes('10 000 сўм'), 'Fason «Lola» va tikish tarifi qo‘shildi');
+await click(boss, 'Нархни ўзгартириш', { wait: 300 });
+await boss.fill('[name=extra]', '2000'); await boss.fill('[name=enote]', 'tosh');
+ok((await boss.locator('#fTot').innerText()).includes('12 000'), 'Narx tahririda tarif va qo‘shimcha haq alohida, jami bir marta (12 000)');
+await shot(boss, '07a-narx-tahriri');
+await boss.locator('#sheet button.x').click(); await boss.waitForTimeout(300);
+await shot(boss, '07b-tariflar');
 
 // 3) Bichuvchi: kelish, bichdim, berish
 await sar.reload(); await sar.waitForTimeout(600);
@@ -124,15 +131,15 @@ ok((await body(sar)).includes('Bichdim') && (await body(sar)).includes('Ishga ke
 await click(sar, 'Ishga keldim', { wait: 1500 });
 ok(/Keldingiz/.test(await body(sar)), 'Ishga keldim: joylashuv + biometrika (Telegram BiometricManager) → qayd etildi');
 await click(sar, 'Bichdim');
-await click(sar, 'Ko‘ylak', { exact: true, wait: 100 });
-await sar.fill('[name=model]', 'Lola'); await sar.fill('[name=material]', 'Paxta'); await sar.fill('[name=color]', 'Qizil');
+await click(sar, 'Lola', { wait: 100 });
+await sar.fill('[name=material]', 'Paxta'); await sar.fill('[name=color]', 'Qizil');
 const rows = sar.locator('#sizes .szrow');
 await rows.nth(0).locator('[name=size]').fill('48'); await rows.nth(0).locator('[name=ready]').fill('8');
 await click(sar, '+ Razmer qo‘shish', { wait: 100 });
 await rows.nth(1).locator('[name=size]').fill('50'); await rows.nth(1).locator('[name=ready]').fill('12'); await rows.nth(1).locator('[name=partial]').fill('3');
 await shot(sar, '07-bichdim');
 await click(sar, 'Saqlash', { exact: true, wait: 1000 });
-ok((await body(sar)).includes('P-0001') && /20\s*erkin/.test(await body(sar)), 'Partiya P-0001: 48—8, 50—12 = 20 erkin, chala alohida');
+ok((await body(sar)).includes('P-0001') && /20\s*tayyor/.test(await body(sar)) && (await body(sar)).includes('Изменить'), 'Bichim P-0001: 48—8, 50—12 = 20 tayyor, chala alohida, «Изменить» bor');
 await shot(sar, '08-bichuvchi-bosh');
 await click(sar, 'Tikuvchiga berish');
 await click(sar, 'Ruxshona Karimova', { exact: true, wait: 100 });
@@ -328,18 +335,77 @@ ok((await body(rux2)).includes('Bu bo‘lim faqat rahbar uchun') && (await body(
 await shot(rux2, '18-begona-rol');
 
 // Til tekshiruvi: rahbar ekranlarida lotin so'z yo'q, xodim ekranlarida kirill yo'q
+// 6) Bichimni tuzatish («Изменить»), yordamchi, rahbar tarixi va hisobdan chiqarish
+await sar.reload(); await sar.waitForTimeout(600); await click(sar, 'Bichuvchi', { wait: 900 });
+await sar.locator('.cutc').filter({ hasText: 'P-0001' }).getByRole('button', { name: 'Изменить' }).click(); await sar.waitForTimeout(500);
+let er = sar.locator('#sizes .szrow');
+await er.nth(0).locator('[name=ready]').fill('0');
+await click(sar, 'Saqlash', { exact: true, wait: 600 });
+ok((await sar.locator('#sheet').innerText()).includes('Sababini yozing'), '«Изменить»: sababsiz saqlanmaydi');
+await sar.fill('[name=reason]', 'Sinab ko‘rish');
+await click(sar, 'Saqlash', { exact: true, wait: 900 });
+ok(/allaqachon tikuvchiga berilgan/.test(await sar.locator('#sheet').innerText()), 'Berilgan donadan pastga tushirishda bog‘liqlik ko‘rsatildi');
+await shot(sar, '08b-izmenit-boglik');
+await er.nth(0).locator('[name=ready]').fill('8');
+await er.nth(1).locator('[name=ready]').fill('11');
+await sar.fill('[name=reason]', '50 razmer bittasi xato sanalgan');
+await click(sar, 'Saqlash', { exact: true, wait: 1000 });
+ok((await body(sar)).includes('tuzatilgan') && /19\s*tayyor/.test(await body(sar)), 'Tuzatildi: 12 → 11, jami 19, «tuzatilgan» belgisi');
+// Yordamchi bilan yangi bichim
+await click(sar, 'Bichdim');
+await click(sar, 'Lola', { wait: 100 });
+await sar.fill('[name=material]', 'Paxta'); await sar.fill('[name=color]', 'Yashil');
+await sar.locator('#sizes .szrow').nth(0).locator('[name=size]').fill('52'); await sar.locator('#sizes .szrow').nth(0).locator('[name=ready]').fill('10');
+await click(sar, 'Yordamchi qo‘shish', { wait: 200 });
+await click(sar, 'Ruxshona Karimova', { exact: true, wait: 100 });
+await sar.fill('[name=hq]', '12');
+await click(sar, 'Saqlash', { exact: true, wait: 600 });
+ok((await sar.locator('#sheet').innerText()).includes('oshmasin'), 'Yordamchi ulushi jami bichimdan oshmaydi');
+await sar.fill('[name=hq]', '4');
+ok((await sar.locator('#cutTot').innerText()).includes('sizga 6') && (await sar.locator('#cutTot').innerText()).includes('yordamchiga 4'), 'Ekranda hisob: sizga 6, yordamchiga 4');
+await shot(sar, '07c-bichdim-yordamchi');
+await click(sar, 'Saqlash', { exact: true, wait: 1000 });
+ok((await body(sar)).includes('Yordamchi: Ruxshona Karimova · 4 dona'), 'Bichim kartasida yordamchi ulushi ko‘rinadi');
+await shot(sar, '08-bichuvchi-bosh');
+await rux.reload(); await rux.waitForTimeout(600); await click(rux, 'Tikuvchi', { wait: 900 });
+await click(rux, 'Mening hisobim', { wait: 900 });
+ok((await body(rux)).includes('Bichishga yordam'), 'Tikuvchi hisobida «Bichishga yordam» qatori');
+await shot(rux, '16b-bichishga-yordam');
+// Rahbar: bichimlar, tarix, hisobdan chiqarish
+await tab(boss, 'Ишлаб чиқариш');
+await click(boss, 'Бичимлар', { wait: 900 });
+await shot(boss, '32-rahbar-bichimlar');
+await boss.locator('.cutc').filter({ hasText: 'P-0001' }).getByRole('button', { name: 'Очиш' }).click(); await boss.waitForTimeout(900);
+const ht = await body(boss);
+ok(/тузатиш тарихи/i.test(ht) && ht.includes('50 razmer bittasi xato sanalgan') && /50\s*12\+3\s*11\+3/.test(ht) && ht.includes('Sardor Toshev'), 'Rahbar tarixda eski 12 → yangi 11, sabab, kim va qachon ko‘radi');
+ok(/Бичиш[\s\S]*8 000/.test(ht), 'Rahbar dona, tarif va jami haqni ko‘radi');
+await shot(boss, '33-rahbar-bichim-tarix');
+await boss.locator('button.back').first().click(); await boss.waitForTimeout(700);
+await boss.locator('.cutc').filter({ hasText: 'Yashil' }).getByRole('button', { name: 'Очиш' }).click(); await boss.waitForTimeout(900);
+ok((await body(boss)).includes('Бичишга ёрдам') && (await body(boss)).includes('Ruxshona Karimova'), 'Rahbar yordamchi ulushini (kim, dona, tarif, summa) ko‘radi');
+await click(boss, 'Ҳисобдан чиқариш…', { wait: 900 });
+ok(/иш ҳақи қайтарилади/i.test(await boss.locator('#sheet').innerText()), 'Hisobdan chiqarishdan oldin ta’sir ko‘rsatildi');
+await shot(boss, '34-hisobdan-chiqarish-tasir');
+await boss.fill('[name=vreason]', 'Dastlabki sinov yozuvi');
+await click(boss, 'Ҳисобдан чиқариш', { exact: true, wait: 600 });
+ok((await boss.locator('#sheet').innerText()).includes('Тасдиқлаш белгисини'), 'Tasdiq belgisisiz chiqarilmaydi');
+await boss.locator('#vok').check();
+await click(boss, 'Ҳисобдан чиқариш', { exact: true, wait: 1000 });
+ok((await body(boss)).includes('Ҳисобдан чиқарилган'), 'Faqat tanlangan yozuv hisobdan chiqarildi');
+await shot(boss, '35-hisobdan-chiqarilgan');
+
 let leaks = [];
 for (const tab_ of ['Бош', 'Ходимлар', 'Ишлаб чиқариш', 'Пул', 'Созламалар']) {
   await tab(boss, tab_);
   leaks = leaks.concat(latinLeak(await boss.locator('#main').innerText()).map((w) => tab_ + ': ' + w));
 }
-ok(leaks.filter((w) => !/Ruxshona|Karimova|Sardor|Toshev|Lola|Paxta|Qizil|Ko‘ylak|Xalat|Uzun|Bolalar|ko‘ylak|ko‘ylagi/.test(w)).length === 0, 'Rahbar ekranlari kirillda (xodim ismlari va katalog nomlari — kiritilgan ma’lumot) ' + leaks.slice(0, 5).join(' | '));
+ok(leaks.filter((w) => !/Ruxshona|Karimova|Sardor|Toshev|Lola|Paxta|Qizil|Ko‘ylak|Xalat|Uzun|Bolalar|ko‘ylak|ko‘ylagi/.test(w)).length === 0, 'Rahbar ekranlari kirillda (xodim ismlari va katalog nomlari — kiritilgan ma’lumot) ' + leaks.filter((w) => !/Ruxshona|Karimova|Sardor|Toshev|Lola|Paxta|Qizil|Ko‘ylak|Xalat|Uzun|Bolalar|ko‘ylak|ko‘ylagi/.test(w)).slice(0, 5).join(' | '));
 // Аудит журнали: техник кодлар ва хом JSON кўринмаслиги керак
 await tab(boss, 'Созламалар');
 await click(boss, 'Аудит журнали', { wait: 900 });
 const audT = await boss.locator('#main').innerText();
 ok(!/[a-z]+_[a-z]+|\{"|"lat"/.test(audT) && audT.includes('Пул берилди') && audT.includes('Корхона жойи белгиланди'), 'Audit jurnali odam tushunadigan kirill matnda');
-leaks = latinLeak(audT).filter((w) => !/Ruxshona|Karimova|Sardor|Toshev|Lola|Paxta|Qizil|Ko‘ylak|Xalat|Uzun|Bolalar|ko‘ylak|ko‘ylagi|Dad|zamok|metr|pombaxt|Gulnora|To‘y/.test(w));
+leaks = latinLeak(audT).filter((w) => !/Ruxshona|Karimova|Sardor|Toshev|Lola|Paxta|Qizil|Ko‘ylak|Xalat|Uzun|Bolalar|ko‘ylak|ko‘ylagi|Dad|Dastlabki|sinov|yozuvi|razmer|bittasi|xato|sanalgan|Sinab|ko‘rish|Yashil|zamok|metr|pombaxt|Gulnora|To‘y/.test(w));
 ok(leaks.length === 0, 'Audit ekranida lotin so‘z yo‘q ' + leaks.slice(0, 5).join(' | '));
 await shot(boss, '19-audit');
 const wtext = (await sar.locator('#main').innerText()) + (await rux.locator('#main').innerText());

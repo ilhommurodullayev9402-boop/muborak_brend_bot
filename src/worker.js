@@ -3,6 +3,8 @@
 import { DurableObject } from 'cloudflare:workers';
 import { handle, cronTick, migrate, AppError } from './core/index.js';
 import { verifyInitData, sha256hex, randomToken } from './auth.js';
+import { getJob, setJob, scheduleWeekly } from './core/arxiv.js';
+import { runArchive } from './arxiv-run.js';
 
 function cfgFrom(env) {
   const ownerIds = String(env.OWNER_TG_ID || '').split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0);
@@ -36,7 +38,9 @@ export class Korxona extends DurableObject {
   }
   async call(tg, action, body, nowMs) {
     try {
-      return { ok: true, ...handle(this.db, cfgFrom(this.env), tg, action, body, nowMs) };
+      const r = { ok: true, ...handle(this.db, cfgFrom(this.env), tg, action, body, nowMs) };
+      if (action === 'archive_now' && !r.replay) await this.ctx.storage.setAlarm(Date.now() + 500);
+      return r;
     } catch (e) {
       if (e instanceof AppError || (e && e.code && e.params)) return { ok: false, error: e.code, params: e.params, status: e.status || 400 };
       console.error('internal', action, e && e.message);
@@ -44,6 +48,37 @@ export class Korxona extends DurableObject {
     }
   }
   async cron(nowMs) { return cronTick(this.db, cfgFrom(this.env), nowMs); }
+  // Har kuni 00:05 (Toshkent) chaqiriladi; faqat dushanba kuni o'tgan haftaning arxivi navbatga qo'yiladi
+  async weekly(nowMs) {
+    const job = this.db.tx(() => scheduleWeekly(this.db, nowMs));
+    if (job) await this.ctx.storage.setAlarm(Date.now() + 1000);
+    return job;
+  }
+  async alarm() { await this.archiveRun(Date.now()); }
+  async archiveRun(nowMs) {
+    const job = getJob(this.db);
+    if (!job) return null;
+    try {
+      const res = await runArchive(this.db, this.env, cfgFrom(this.env).ownerIds, job, nowMs);
+      this.db.tx(() => {
+        setJob(this.db, null);
+        if (!job.manual) this.db.run("INSERT INTO meta(k,v) VALUES('archive_last',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", job.from);
+      });
+      return res;
+    } catch (e) {
+      console.error('archive', e && e.message);
+      job.attempts = (job.attempts || 0) + 1;
+      if (job.attempts < 3) {
+        this.db.tx(() => setJob(this.db, job));
+        await this.ctx.storage.setAlarm(Date.now() + 10 * 60000);
+      } else {
+        this.db.tx(() => setJob(this.db, null));
+        const to = job.manual && job.by ? [{ tg_id: job.by }] : this.db.all("SELECT tg_id FROM users WHERE role='rahbar' AND status='active'");
+        await sendTelegram(this.env, to.map((u) => ({ tg_id: u.tg_id, text: '⚠️ Ҳафталик архивни юбориб бўлмади. Кейинроқ Созламалар’да «Архивни ҳозир юбориш» тугмасини босинг.' })));
+      }
+      return { error: true };
+    }
+  }
 }
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
@@ -78,11 +113,11 @@ async function sendTelegram(env, list) {
   }
 }
 
-async function sendDocument(env, chatId, name, text) {
+async function sendDocument(env, chatId, name, text, caption = 'MUBORAK BREND — база захира нусхаси') {
   try {
     const fd = new FormData();
     fd.append('chat_id', String(chatId));
-    fd.append('caption', 'MUBORAK BREND — база захира нусхаси');
+    fd.append('caption', caption);
     fd.append('document', new Blob([text], { type: 'application/json' }), name);
     const r = await fetch(`${env.TG_API || 'https://api.telegram.org'}/bot${env.BOT_TOKEN}/sendDocument`, { method: 'POST', body: fd });
     return r.ok;
@@ -162,6 +197,13 @@ export default {
       await sendTelegram(env, r.notify);
       return json({ ok: true, result: r.sent });
     }
+    if (env.TEST_MODE === '1' && url.pathname === '/__test/archive') {
+      // Faqat lokal sinov: haftalik arxivni darhol (alarm kutmasdan) ishga tushirish
+      const now = Number(req.headers.get('x-test-now')) || Date.now();
+      const job = await stub(env).weekly(now);
+      const res = await stub(env).archiveRun(now);
+      return json({ ok: true, result: { job, res } });
+    }
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(req);
     if (req.method !== 'POST') return json({ ok: false, error: 'method' }, 405);
     if (!env.BOT_TOKEN) return json({ ok: false, error: 'not_configured' }, 503);
@@ -218,6 +260,8 @@ export default {
     return json({ ok: true, result });
   },
   async scheduled(evt, env, ctx) {
+    // "5 19 * * *" — har kuni 00:05 Toshkent: dushanba bo'lsa o'tgan haftaning arxivi
+    if (evt && evt.cron === '5 19 * * *') { await stub(env).weekly(Date.now()); return; }
     const r = await stub(env).cron(Date.now());
     if (r.notify && r.notify.length) ctx.waitUntil(sendTelegram(env, r.notify));
   },

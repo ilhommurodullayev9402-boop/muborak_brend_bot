@@ -8,5 +8,6 @@ stop; rm -rf .wrangler/state; start
 node test/acceptance.mjs main; A=$?
 stop; start
 node test/acceptance.mjs restart; B=$?
+node test/bichim.mjs; C=$?
 stop
-exit $((A + B))
+exit $((A + B + C))

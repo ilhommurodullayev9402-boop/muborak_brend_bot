@@ -291,11 +291,17 @@ export const actions = {
       let filled = 0;
       filled += fillOrderRates(ctx);
       for (const e of ctx.db.all('SELECT * FROM earnings WHERE amount IS NULL AND order_id IS NULL')) {
-        const li = ctx.lineInfo(e.line_id);
-        const r = ctx.findRate(e.work, li.type_id, li.model, e.day);
+        let r;
+        if (e.cut_id || e.src.startsWith('pd:')) {
+          // Bichimdan yozilgan haq: yagona bichish / yordamchi tarifi (o'sha kunga)
+          const f = ctx.flatRate(e.work === 'bichish_yordam' ? 'bichish_yordam' : 'bichish', e.day);
+          r = f ? { rate_id: null, price: f.price, extra: null } : null;
+        } else r = ctx.priceFor(e.work, ctx.lineInfo(e.line_id), e.day);
         if (!r) continue;
-        ctx.db.run('UPDATE earnings SET rate_id=?,price=?,amount=? WHERE id=? AND amount IS NULL', r.id, r.price, r.price * e.qty, e.id);
-        ctx.audit('earning_rate_filled', 'earning', e.id, { amount: null }, { rate_id: r.id, amount: r.price * e.qty });
+        ctx.db.run('UPDATE earnings SET rate_id=?,price=?,amount=?,extra=? WHERE id=? AND amount IS NULL', r.rate_id, r.price, r.price * e.qty, r.extra, e.id);
+        if (e.cut_id && e.work === 'bichish') ctx.db.run('UPDATE cuts SET cut_price=? WHERE id=? AND cut_price IS NULL', r.price, e.cut_id);
+        if (e.cut_id && e.work === 'bichish_yordam') ctx.db.run('UPDATE cuts SET helper_price=? WHERE id=? AND helper_price IS NULL', r.price, e.cut_id);
+        ctx.audit('earning_rate_filled', 'earning', e.id, { amount: null }, { rate_id: r.rate_id, amount: r.price * e.qty });
         filled++;
       }
       return { filled };

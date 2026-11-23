@@ -6,10 +6,14 @@
   "assets": { "directory": "./public", "binding": "ASSETS" },
   "durable_objects": { "bindings": [{ "name": "KORXONA", "class_name": "Korxona" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Korxona"] }],
-  // Har kuni 03:00 UTC (Toshkent 08:00) — tug'ilgan kun eslatmalari
-  "triggers": { "crons": ["0 3 * * *"] },
+  // 03:00 UTC (Toshkent 08:00) — tug'ilgan kun va buyurtma eslatmalari;
+  // 19:05 UTC (Toshkent 00:05) — dushanba kuni o'tgan haftaning ZIP arxivi yuboriladi
+  "triggers": { "crons": ["0 3 * * *", "5 19 * * *"] },
   "observability": { "enabled": true },
   // Panelda kiritilgan sozlamalar har yangilanishda o'chib ketmasin
-  "keep_vars": true
+  "keep_vars": true,
+  // PR/shox uchun Cloudflare sinov nusxasi (Worker Previews). Jonli botga ta'sir qilmaydi;
+  // sinov nusxasida Durable Object (baza) yo'q, ya'ni jonli ma'lumotga tegmaydi.
+  "previews": {}
   // Maxfiy sozlamalar Cloudflare panelida kiritiladi: BOT_TOKEN (Secret), OWNER_TG_ID (Text)
 }
