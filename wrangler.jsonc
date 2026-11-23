@@ -11,6 +11,9 @@
   "triggers": { "crons": ["0 3 * * *", "5 19 * * *"] },
   "observability": { "enabled": true },
   // Panelda kiritilgan sozlamalar har yangilanishda o'chib ketmasin
-  "keep_vars": true
+  "keep_vars": true,
+  // PR/shox uchun Cloudflare sinov nusxasi (Worker Previews). Jonli botga ta'sir qilmaydi;
+  // sinov nusxasida Durable Object (baza) yo'q, ya'ni jonli ma'lumotga tegmaydi.
+  "previews": {}
   // Maxfiy sozlamalar Cloudflare panelida kiritiladi: BOT_TOKEN (Secret), OWNER_TG_ID (Text)
 }
