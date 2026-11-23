@@ -96,12 +96,12 @@ export const state = { lang: 'lat', stack: [], screens: {}, me: null };
 export function setLang(l) { state.lang = l; document.documentElement.lang = l === 'cyr' ? 'uz-Cyrl' : 'uz'; }
 export function setMain(html) { $('#main').innerHTML = html; }
 export function setTop(html) { $('#top').innerHTML = html; }
-// Brend sarlavhasi: ikat burchaklar, tikuv mashinasi belgisi, oltin naqshli ajratgich (faqat ko'rinish).
+// Brend sarlavhasi: tikuv mashinasi belgisi, oltin naqshli ajratgich (faqat ko'rinish).
 const SEW_SVG = `<svg class="sew" viewBox="0 0 96 56" aria-hidden="true"><path class="th" d="M4 50c18-9 34 4 52-3s28-10 36-4" fill="none" stroke-width="1.6" stroke-linecap="round"/><path class="mc" d="M22 44V20c0-6 4-10 10-10h34c6 0 10 4 10 10v6h-8v-4c0-2-1-3-3-3H38c-3 0-4 2-4 4v21z"/><rect class="mc" x="16" y="44" width="62" height="7" rx="2"/><rect class="mc" x="66" y="26" width="6" height="12" rx="1"/><path d="M69 38v6" stroke-width="1.6" class="nd"/><rect class="sp" x="52" y="2" width="8" height="8" rx="1.5"/><circle class="mcl" cx="27" cy="26" r="2.5"/></svg>`;
 export const ORN = `<span class="orn" aria-hidden="true"><i></i><svg viewBox="0 0 24 14"><path d="M12 1c2 3 2 6 0 9-2-3-2-6 0-9zM12 10c3-4 7-5 10-4-2 3-6 5-10 4zM12 10c-3-4-7-5-10-4 2 3 6 5 10 4z"/></svg><i></i></span>`;
 export function brandTop(sub, who) {
   const hi = state.lang === 'cyr' ? 'Ассалому алайкум' : 'Assalomu alaykum';
-  setTop(`<div class="hdr"><span class="ik l" aria-hidden="true"></span><span class="ik r" aria-hidden="true"></span><img class="lg" src="img/logo.jpg" alt="" aria-hidden="true">
+  setTop(`<div class="hdr"><img class="lg" src="img/logo.jpg" alt="" aria-hidden="true">
     <b class="logo wmk">MUBORAK BREND</b>${ORN}<small class="role">${esc(sub || '')}</small></div>
     ${who ? `<div class="who"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4.5"/><path d="M3 22c0-5 4-8.5 9-8.5s9 3.5 9 8.5z"/></svg><span>${hi}, <b>${esc(who)}</b></span></div>` : ''}`);
 }
