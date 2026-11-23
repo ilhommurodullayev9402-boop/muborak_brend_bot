@@ -5,6 +5,7 @@ import {
   getLocation, openLocationSettings, biometric, errText, ApiError, tg, pickPhoto, photoTag, canRecord, recordStart, recordStop, isRecording, voiceTag,
 } from './core.js';
 import { initOrders } from './buyurtma.js';
+import { cutCard, cutDetail, cutNewSheet } from './bichim.js';
 
 const L = 'lat';
 let ROLE = 'tikuvchi';
@@ -20,7 +21,10 @@ const METHOD = { prepaid: 'Avval/alohida to‘langan', debt: 'Hali qarz', payrol
 const PAY_ST = { pending: ['Sizning tasdig‘ingiz kutilmoqda', 'warn'], confirmed: ['Tasdiqlangan', 'ok'], disputed: ['Tafovut yozilgan', 'bad'], cancelled: ['Bekor qilingan', ''], reverse_pending: ['Bekor qilish so‘ralgan', 'warn'], reversed: ['Bekor qilingan', ''] };
 const TR_ST = { pending: ['Qabul kutilmoqda', 'blue'], accepted: ['Qabul qildi', 'ok'], disputed: ['Aniqlashtirish so‘raldi', 'bad'], cancelled: ['Bekor qilingan', ''], resolved: ['Rahbar hal qildi', 'ok'] };
 const tag = ([t, c]) => `<span class="tag ${c}">${esc(t)}</span>`;
-const gl = (g) => (g.zakaz ? 'Buyurtma (zakaz)' : `${esc(g.type_name)} «${esc(g.model)}»`);
+const MARK = { fix: ' <span class="tag warn">tuzatish</span>', void: ' <span class="tag bad">hisobdan chiqarildi</span>' };
+const gl = (g) => (g.zakaz ? 'Buyurtma (zakaz)' : `${esc(g.type_name)} «${esc(g.model)}»${g.giver ? ` · ulush: ${esc(g.giver)}` : ''}${MARK[g.mark] || ''}`);
+const WN = { bichish: 'Bichish', tikish: 'Tikish', bichish_yordam: 'Bichishga yordam' };
+const pr = (g) => (g.price == null ? '<span class="tag warn">yo‘q</span>' : fmt(g.price) + (g.extra ? `<div class="sub">shundan qo‘shimcha ${fmt(g.extra)}</div>` : ''));
 const prodLabel = (x) => `${esc(x.type_name || '')} «${esc(x.model)}» · ${esc(x.material)} · ${esc(x.color)}`;
 
 export async function start(role) {
@@ -118,15 +122,14 @@ async function home() {
 }
 
 async function cutterHome() {
-  const h = await api('cut_home');
+  const [h, cuts] = await Promise.all([api('cut_home'), api('cut_list', { limit: 15 })]);
   cache.cut = h;
-  const bs = h.batches;
   const od = await api('ord_list', {});
   const late = od.rows.filter((o) => o.overdue || (o.days_left <= 2 && o.status !== 'ready')).length;
   const waitMe = od.rows.filter((o) => o.status === 'sewn').length;
   return `<h2>Bichuv</h2>
   <div class="stack">
-    <button class="big primary" data-act="cut"><span class="ic">✂︎</span><span>Bichdim<small>Tayyor va chala bichimni kiritish</small></span></button>
+    <button class="big primary" data-act="cutNew"><span class="ic">✂︎</span><span>Bichdim<small>Fason, razmerlar, yordamchi</small></span></button>
     <button class="big" data-act="go" data-s="o_list"><span class="ic">📐</span><span>Buyurtmalar (zakaz)<small>${od.rows.length ? `${od.rows.length} ta jarayonda${late ? ` · <b style="color:var(--bad)">${late} tasining muddati yaqin</b>` : ''}${waitMe ? ` · ${waitMe} ta qabul kutmoqda` : ''}` : 'Mijozdan alohida buyurtma'}</small></span>${late + waitMe ? `<span class="cnt">${late + waitMe}</span>` : ''}</button>
     <div class="grid2">
       <button class="big" data-act="give"><span class="ic">➜</span><span>Tikuvchiga berish<small>Kimga, nechta</small></span></button>
@@ -139,12 +142,9 @@ async function cutterHome() {
     <div class="stat" style="--c:var(--c-partial)"><b class="num">${fmt(h.today.partial)}</b><span>Chala bichim</span></div>
     <div class="stat" style="--c:var(--c-reserved)"><b class="num">${fmt(h.today.given)}</b><span>Berildi</span></div>
   </div>
-  <h2>Partiyalar</h2>
-  ${bs.length ? bs.map((b) => `<button class="card tap" data-act="go" data-s="w_batch" data-id="${b.id}">
-      <div class="row">${photoTag(b.photo_id)}<div class="grow"><div class="title">${prodLabel(b)}</div><div class="mono">${esc(b.code)} · ${dmy(b.day)} · ${b.lines.map((l) => esc(l.size)).join(', ')}</div></div>
-      <div class="bignum num">${fmt(b.totals.free || 0)}<small>erkin</small></div></div>
-      ${b.totals.partial ? `<div class="sub" style="margin-top:4px">Chala bichim: <b>${fmt(b.totals.partial)}</b> (tarqatilmaydi)</div>` : ''}
-      ${tape(b.totals, L)}</button>`).join('') : '<div class="empty">Hali partiya yo‘q. «Bichdim» bilan boshlang.</div>'}
+  <h2>Bichimlarim</h2>
+  <p class="hint" style="margin-top:-4px">Har bir «Bichdim» alohida yozuv. Xato bo‘lsa «Изменить» bilan sabab yozib tuzating.</p>
+  ${cuts.length ? cuts.map((c) => cutCard(c)).join('') : '<div class="empty">Hali bichim yo‘q. «Bichdim» bilan boshlang.</div>'}
   <h2>Berilganlar</h2>
   ${h.transfers.length ? `<div class="list">${h.transfers.slice(0, 15).map((t) => `<div class="li">${ava(t.to_name, t.to_id, 34)}<div class="grow"><b>${esc(t.to_name)}</b> · ${fmt(t.total)} dona
       <div class="sub">${esc(t.code)} · ${dmy(t.day)} ${t.time} · ${t.items.map((i) => esc(i.code + ' ' + i.size + ': ' + i.qty)).join(', ')}</div>
@@ -321,7 +321,7 @@ async function batchScreen({ id }) {
   <h1 class="page">${prodLabel(b)}</h1><div class="mono">${esc(b.code)} · ${dmy(b.day)}${b.cutter ? ' · ' + esc(b.cutter) : ''}</div>
   ${photoTag(b.photo_id, 'ph lg')}
   ${tape(b.totals, L)}
-  <h2>Razmerlar <button data-act="cut" data-id="${b.id}">+ Bichim qo‘shish</button></h2>
+  <h2>Razmerlar</h2>
   <div class="card scrollx"><table class="t"><tr><th>Razmer</th><th>Tayyor jami</th><th>Erkin</th><th>Chala</th><th>Tikuvchilarda</th><th>Qabul</th></tr>
     ${b.lines.map((l) => { const s = l.states; return `<tr><td><b>${esc(l.size)}</b></td><td>${fmt(l.ready_total)}</td><td>${fmt(s.free || 0)}</td><td>${fmt(s.partial || 0)}${s.partial ? `<br><button class="link" data-act="partial" data-id="${l.line_id}" data-max="${s.partial}">tugatdim</button>` : ''}</td>
       <td>${fmt((s.reserved || 0) + (s.sewing || 0) + (s.rework || 0) + (s.review || 0))}</td><td>${fmt(s.accepted || 0)}</td></tr>`; }).join('')}
@@ -330,6 +330,12 @@ async function batchScreen({ id }) {
   ${b.lines.some((l) => l.holders.length) ? `<div class="list">${b.lines.flatMap((l) => l.holders.map((h) => `<div class="li"><div class="grow"><b>${esc(h.name)}</b><div class="sub">razmer ${esc(l.size)} · ${S[h.state]}</div></div><div class="r">${fmt(h.qty)}</div></div>`)).join('')}</div>` : '<div class="empty">Hali hech kimga berilmagan.</div>'}
   <h2>Harakatlar</h2>
   <div class="list">${b.moves.slice(0, 40).map((m) => `<div class="li"><div class="grow">${KIND[m.kind] || m.kind}${m.tf ? ' → ' + esc(m.tf) : m.ff ? ' · ' + esc(m.ff) : ''}<div class="sub">${dt(m.at)} · razmer ${esc(m.size)}${m.note ? ' · ' + esc(m.note) : ''}</div></div><div class="r">${fmt(m.qty)}</div></div>`).join('')}</div>`;
+}
+
+async function cutScreen({ id }) {
+  top('Bichim');
+  const c = await api('cut_detail', { cut_id: Number(id) });
+  return cutDetail(c, { extra: `<button class="btn ghost" style="margin-top:12px" data-act="go" data-s="w_batch" data-id="${c.batch_id}">Partiya holati (kimda, chala bichim) ›</button>` });
 }
 
 let moneyP = null;
@@ -359,7 +365,7 @@ async function moneyScreen() {
       <div class="sub">${a.kind === 'opening' ? 'Boshlang‘ich qoldiq' : 'Hisob tuzatishi'}: ${esc(a.reason)}</div>
       <div class="actions row2"><button class="btn ok" data-act="adjAns" data-id="${a.id}" data-a="1">Roziman</button><button class="btn ghost" data-act="adjAns" data-id="${a.id}" data-a="0">E’tiroz</button></div></div>`).join('');
   const tks = m.takeaways.map((k) => tkConfirmCard(k)).join('');
-  const W = { bichish: 'Bichish', tikish: 'Tikish' };
+  const W = WN;
   return `<button class="back" data-act="back">‹ Orqaga</button>
   ${pays || adjs || tks ? `<h2>Sizning tasdig‘ingiz kerak</h2>${pays}${adjs}${tks}` : ''}
   <h2>Oylik hisobim</h2>
@@ -374,7 +380,7 @@ async function moneyScreen() {
   <h2>Oylik varaqasi</h2>
   ${periodPicker(L, moneyP, 'mPer')}
   <div class="card" style="margin-top:10px">
-    ${ps.groups.length ? `<table class="t"><tr><th>Ish</th><th>Dona</th><th>Tarif</th><th>Summa</th></tr>${ps.groups.map((g) => `<tr><td>${W[g.work]}: ${gl(g)}</td><td>${fmt(g.qty)}</td><td>${g.price == null ? '<span class="tag warn">yo‘q</span>' : fmt(g.price)}</td><td>${g.amount == null ? '—' : fmt(g.amount)}</td></tr>`).join('')}</table>`
+    ${ps.groups.length ? `<table class="t"><tr><th>Ish</th><th>Dona</th><th>Tarif</th><th>Summa</th></tr>${ps.groups.map((g) => `<tr><td>${W[g.work]}: ${gl(g)}</td><td>${fmt(g.qty)}</td><td>${pr(g)}</td><td>${g.amount == null ? '—' : fmt(g.amount)}</td></tr>`).join('')}</table>`
       : '<div class="sub">Bu davrda qabul qilingan ish yo‘q.</div>'}
     ${ps.missingQty ? `<div class="banner warn" style="margin-top:8px">${fmt(ps.missingQty)} dona uchun tarif hali belgilanmagan. Summa taxmin qilinmaydi, rahbar belgilagach qo‘shiladi.</div>` : ''}
     <div class="bal" style="margin-top:12px">
@@ -436,7 +442,7 @@ function rkTable(d) {
   </div>
   ${d.items.length ? `<details style="margin-top:10px"><summary>Olganlarim ro‘yxati · ${d.items.length} ta</summary><div class="list" style="margin-top:8px">${d.items.map((k) => `<div class="li">${photoTag(k.photo_id)}<div class="grow">${esc(k.name)}<div class="sub">${dmy(k.day)}</div></div><div class="r">${fmt(k.amount)}</div></div>`).join('')}</div></details>` : ''}
   ${d.avans.length ? `<details style="margin-top:6px"><summary>Avanslar · ${d.avans.length} ta</summary><div class="list" style="margin-top:8px">${d.avans.map((p) => `<div class="li"><div class="grow">${dmy(p.day)}<div class="sub">${esc(p.code)}</div></div><div class="r">${fmt(p.amount)}</div></div>`).join('')}</div></details>` : ''}
-  ${d.groups.length ? `<details style="margin-top:6px"><summary>Qilgan ishlarim</summary><table class="t" style="margin-top:8px"><tr><th>Ish</th><th>Dona</th><th>Summa</th></tr>${d.groups.map((g) => `<tr><td>${g.work === 'bichish' ? 'Bichish' : 'Tikish'}: ${gl(g)}</td><td>${fmt(g.qty)}</td><td>${g.amount == null ? '—' : fmt(g.amount)}</td></tr>`).join('')}</table></details>` : ''}`;
+  ${d.groups.length ? `<details style="margin-top:6px"><summary>Qilgan ishlarim</summary><table class="t" style="margin-top:8px"><tr><th>Ish</th><th>Dona</th><th>Summa</th></tr>${d.groups.map((g) => `<tr><td>${WN[g.work] || g.work}: ${gl(g)}</td><td>${fmt(g.qty)}</td><td>${g.amount == null ? '—' : fmt(g.amount)}</td></tr>`).join('')}</table></details>` : ''}`;
 }
 
 const RK_WHY = { cash_open: 'rahbarga topshirgan pulingiz hali tasdiqlanmagan', missing_rate: 'ba’zi ishlarga tarif qo‘yilmagan', unpriced: 'ba’zi olganlaringizga hali narx qo‘yilmagan', payment_open: 'tasdiqlanmagan to‘lov bor',
@@ -488,7 +494,7 @@ async function mjScreen() {
     ${a.status === 'open' ? `<div class="actions"><button class="link" data-act="mjCancel" data-id="${a.id}">Bekor qilish</button></div>` : ''}</div>`).join('') : '<div class="empty">Hali murojaat yo‘q.</div>'}`;
 }
 
-registerScreens({ w_mj: mjScreen, w_home: home, w_batch: batchScreen, w_money: moneyScreen, w_tk: tkScreen, w_att: attScreen, w_moves: movesScreen, w_insp: inspScreen });
+registerScreens({ w_cut: cutScreen, w_mj: mjScreen, w_home: home, w_batch: batchScreen, w_money: moneyScreen, w_tk: tkScreen, w_att: attScreen, w_moves: movesScreen, w_insp: inspScreen });
 
 // ---------- Tugmalar ----------
 const done = async (msg) => { closeSheet(); toast(msg); await refresh(); };
@@ -499,6 +505,7 @@ on({
   locSettings: () => openLocationSettings(),
   attExc: async (el) => { await act('att_exception', { kind: el.dataset.k, reason: el.dataset.r, note: val('note') }, el); await done('So‘rov rahbarga yuborildi'); },
   cut: (el) => cutSheet(el.dataset.id),
+  cutNew: () => cutNewSheet(),
   addSize: () => $('#sizes').insertAdjacentHTML('beforeend', sizeRow()),
   rmSize: (el) => { if ($$('#sizes .szrow').length > 1) el.closest('.szrow').remove(); },
   tkPhoto: async () => {

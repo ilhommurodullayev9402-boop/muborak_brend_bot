@@ -56,9 +56,16 @@ const METHOD = { prepaid: 'avval/alohida to‘langan', debt: 'hali qarz', payrol
 
 export function payslip(ctx, uid, from, to) {
   const u = ctx.user(uid);
-  const groups = ctx.db.all(`SELECT e.work, (e.order_id IS NOT NULL) zakaz, c.name type_name, COALESCE(b.model,'') model, e.price, SUM(e.qty) qty, SUM(e.amount) amount, COUNT(*) n
+  // Guruh: ish turi, fason, dona narxi (shundan qo'shimcha haq), tuzatish/hisobdan chiqarish belgisi, yordamda — ulush ajratgan bichuvchi
+  const groups = ctx.db.all(`SELECT e.work, (e.order_id IS NOT NULL) zakaz, c.name type_name, COALESCE(b.model,'') model, e.price, e.extra,
+      CASE WHEN e.src LIKE 'void:%' THEN 'void' WHEN e.note='Tuzatish' THEN 'fix' ELSE NULL END mark,
+      CASE WHEN e.work='bichish_yordam' THEN TRIM(COALESCE(cu.first_name,'')||' '||COALESCE(cu.last_name,'')) END giver,
+      SUM(e.qty) qty, SUM(e.amount) amount, COUNT(*) n
     FROM earnings e LEFT JOIN lines l ON l.id=e.line_id LEFT JOIN batches b ON b.id=l.batch_id LEFT JOIN catalog c ON c.id=b.type_id
-    WHERE e.user_id=? AND e.day BETWEEN ? AND ? GROUP BY e.work, zakaz, c.name, b.model, e.price ORDER BY e.work, zakaz, c.name, b.model`, uid, from, to);
+    LEFT JOIN cuts ct ON ct.id=e.cut_id LEFT JOIN users cu ON cu.id=ct.cutter_id
+    WHERE e.user_id=? AND e.day BETWEEN ? AND ? GROUP BY e.work, zakaz, c.name, b.model, e.price, e.extra, mark, giver
+    HAVING SUM(e.qty)<>0 OR SUM(COALESCE(e.amount,0))<>0
+    ORDER BY CASE e.work WHEN 'bichish' THEN 1 WHEN 'bichish_yordam' THEN 2 ELSE 3 END, zakaz, c.name, b.model, mark`, uid, from, to);
   const earned = groups.reduce((a, g) => a + (g.amount || 0), 0);
   const missingQty = groups.filter((g) => g.price == null).reduce((a, g) => a + g.qty, 0);
   const opening = ledger(ctx, uid, addDays(from, -1)).balance;

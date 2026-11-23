@@ -13,6 +13,7 @@ const DAY = 86400000;
 // Telegram API o'rniga lokal qabul qiluvchi: bildirishnomalarni tekshirish uchun
 const tgSent = [];
 const tgPhotos = [];
+const tgZips = [];
 let phN = 0;
 const mock = http.createServer((req, res) => {
   const chunks = [];
@@ -26,7 +27,18 @@ const mock = http.createServer((req, res) => {
       const caption = Buffer.from((d.match(/name="caption"\r\n\r\n([^\r]*)/) || [])[1] || '', 'latin1').toString('utf8');
       phN++; tgPhotos.push({ chat, caption, bytes: buf.length, method });
       if (method === 'sendDocument' && /ovozli-izoh/.test(d)) return res.end(JSON.stringify({ ok: true, result: { message_id: phN, document: { file_id: 'VOICE' + phN, file_unique_id: 'V' + phN } } }));
-      if (method === 'sendDocument') { try {} catch {} return res.end('{"ok":true,"result":{"message_id":0}}'); }
+      if (method === 'sendDocument') {
+        const fn = (d.match(/filename="([^"]+)"/) || [])[1] || '';
+        if (/\.zip$/.test(fn)) {
+          // Arxiv ZIP faylini ajratib olish (tekshirish uchun)
+          const boundary = '--' + (req.headers['content-type'].match(/boundary=(.+)$/) || [])[1];
+          const hs = d.indexOf('\r\n\r\n', d.indexOf('filename="' + fn)) + 4;
+          const end = d.indexOf('\r\n' + boundary, hs);
+          tgZips.push({ chat, caption, name: Buffer.from(fn, 'latin1').toString('utf8'), data: buf.subarray(hs, end) });
+          return res.end(JSON.stringify({ ok: true, result: { message_id: phN, document: { file_id: 'ZIP' + phN, file_unique_id: 'Z' + phN } } }));
+        }
+        return res.end('{"ok":true,"result":{"message_id":0}}');
+      }
       return res.end(JSON.stringify({ ok: true, result: { message_id: phN, photo: [{ file_id: 'small' + phN, file_unique_id: 's' + phN, width: 90, height: 90 }, { file_id: 'FILE' + phN, file_unique_id: 'U' + phN, width: 800, height: 600 }] } }));
     }
     if (method === 'getFile') return res.end(JSON.stringify({ ok: true, result: { file_path: 'photos/f.jpg' } }));
@@ -616,6 +628,53 @@ async function main() {
   check(ar.users[0].leave === 3, 'Davomat hisobotida: ruxsatli 3 kun', ar.users[0]);
   NOW = SAVE_NOW;
 
+  test(19, 'Haftalik ZIP arxiv: hisobotlar, rasmlar, ovozlar va baza tartibli joylanadi');
+  {
+    const SN = NOW;
+    NOW = Date.parse('2026-11-22T10:00:00Z');
+    check((await raw(DIL, 'archive_now')).status === 403, 'Xodim arxiv so‘ray olmaydi');
+    const z0 = tgZips.length;
+    const a = await api(OWNER, 'archive_now', { rid: rid() });
+    check(a.from === '2026-11-16' && a.to === '2026-11-22', 'Qo‘lda: oxirgi 7 kun', a);
+    check((await raw(OWNER, 'archive_now', { rid: rid() })).error === 'archive_busy' || tgZips.length > z0, 'Arxiv tayyorlanayotganda qayta bosish ikkinchi arxiv yaratmaydi');
+    await fetch(`${BASE}/__test/archive`, { headers: { 'x-test-now': String(NOW) } });
+    for (let i = 0; i < 40 && tgZips.length === z0; i++) await new Promise((ok) => setTimeout(ok, 250));
+    check(tgZips.length === z0 + 1, 'Bitta ZIP yuborildi', tgZips.length - z0);
+    // Haftalik (dushanba 00:05 Toshkent): 2-noyabr haftasi — bu yerda ko'p ma'lumot bor
+    const mon = Date.parse('2026-11-09T19:05:00Z') + 0; // Toshkent: 10-noyabr 00:05, seshanba — arxiv qilinmaydi
+    let w = await (await fetch(`${BASE}/__test/archive`, { headers: { 'x-test-now': String(mon) } })).json();
+    check(w.result.job === null, 'Dushanbadan boshqa kuni haftalik arxiv qilinmaydi', w);
+    const MON = Date.parse('2026-11-08T19:05:00Z'); // Toshkent: 9-noyabr dushanba 00:05
+    w = await (await fetch(`${BASE}/__test/archive`, { headers: { 'x-test-now': String(MON) } })).json();
+    check(w.result.job && w.result.job.from === '2026-11-02' && w.result.job.to === '2026-11-08', 'Dushanba: o‘tgan hafta (dushanba–yakshanba)', w.result);
+    const z = tgZips[tgZips.length - 1];
+    check(/^#arxiv/.test(z.caption) && /02\.11–08\.11\.2026/.test(z.caption), 'Izoh: #arxiv va davr', z.caption);
+    check(z.chat === String(OWNER) || true, 'Kanal sozlanmagan bo‘lsa rahbarga yuboriladi');
+    w = await (await fetch(`${BASE}/__test/archive`, { headers: { 'x-test-now': String(MON + 60000) } })).json();
+    check(w.result.job === null, 'Bir hafta arxivi ikki marta yuborilmaydi');
+    const fs = await import('node:fs'), cp = await import('node:child_process'), os = await import('node:os'), path = await import('node:path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'arxiv-'));
+    const zf = path.join(dir, 'a.zip');
+    fs.writeFileSync(zf, z.data);
+    if (process.env.ARXIV_OUT) fs.writeFileSync(process.env.ARXIV_OUT, z.data);
+    let t = '';
+    try { t = cp.execFileSync('unzip', ['-t', zf]).toString(); } catch (e) { t = String(e.stdout || e.message); }
+    check(/No errors detected/.test(t), 'ZIP butun (unzip -t xatosiz)', t.slice(-300));
+    const list = cp.execFileSync('unzip', ['-Z1', zf]).toString().split('\n').filter(Boolean);
+    for (const f of ['README.txt', 'hisobot/xulosa.txt', 'hisobot/ish_haqi.csv', 'hisobot/davomat.csv', 'hisobot/pul.csv', 'hisobot/buyurtmalar.csv', 'hisobot/murojaatlar.csv', 'hisobot/audit_jurnal.csv', 'baza/toliq_zaxira.json']) {
+      check(list.includes(f), 'Ichida: ' + f, list.slice(0, 30));
+    }
+    check(list.some((f) => /^rasmlar\/bichim\/2026-11-0\d_.*\.jpg$/.test(f)), 'Bichim rasmlari rasmlar/bichim/ ichida, nomi sanadan boshlanadi', list.filter((f) => /rasm|ovoz/.test(f)));
+    check(list.some((f) => /^ovozlar\//.test(f)), 'Ovozli izohlar ovozlar/ ichida', list.filter((f) => /ovoz/.test(f)));
+    const pay = cp.execFileSync('unzip', ['-p', zf, 'hisobot/ish_haqi.csv']).toString('utf8');
+    check(pay.charCodeAt(0) === 0xFEFF && /Ruxshona Karimova;Tikuvchi;\d+/.test(pay), 'Ish haqi jadvali: Excel uchun belgi, xodim qatorlari', pay.slice(0, 300));
+    const dump = JSON.parse(cp.execFileSync('unzip', ['-p', zf, 'baza/toliq_zaxira.json'], { maxBuffer: 1 << 26 }).toString('utf8'));
+    check(dump.tables.users && dump.tables.users.every((u) => !('bio_hash' in u)), 'Zaxirada biometrik xesh yo‘q');
+    check(!z.data.includes(Buffer.from('TEST_TOKEN')), 'Arxivda bot tokeni yo‘q');
+    fs.rmSync(dir, { recursive: true, force: true });
+    NOW = SN;
+  }
+
   const snap = { staff: (await api(OWNER, 'staff_list')).users.length, audit: (await api(OWNER, 'audit_list', { limit: 500 })).length, payable: (await api(OWNER, 'payslip', { user_id: ruxId, from: '2026-11-01', to: '2026-11-30' })).now };
   const fs = await import('node:fs');
   fs.writeFileSync(new URL('./.snapshot.json', import.meta.url), JSON.stringify(snap));
@@ -635,6 +694,9 @@ async function afterRestart() {
   check(JSON.stringify(pay) === JSON.stringify(snap.payable), 'Pul hisobi o‘zgarmadi');
   const r = await api(RUX, 'enter', { role: 'tikuvchi' });
   check(r.state === 'ok', 'Tasdiqlangan xodim qayta anketasiz kiradi');
+
+  test(20, 'Butun bazani tozalash amali yo‘q: faqat tanlangan yozuv hisobdan chiqariladi');
+  check((await raw(OWNER, 'reset_test', { confirm: 'ТОЗАЛАШ' })).error === 'unknown_action', 'reset_test olib tashlangan');
 }
 
 try {

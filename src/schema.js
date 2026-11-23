@@ -124,6 +124,58 @@ export const MIGRATIONS = [
   CREATE INDEX appeals_st ON appeals(status, id);
   CREATE INDEX appeals_u ON appeals(user_id, id);
   `,
+  // 6 — fasonlar va tariflar, har bir «Bichdim» alohida yozuv (tuzatish tarixi bilan), bichishga yordamchi ulushi.
+  // Mavjud yozuvlar o'chirilmaydi: eski bichimlar harakatlar (moves) asosida alohida yozuv sifatida tiklanadi.
+  `
+  CREATE TABLE fasons(id INTEGER PRIMARY KEY, name TEXT NOT NULL, type_id INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+    created_by INTEGER, created_at TEXT NOT NULL);
+  CREATE UNIQUE INDEX fasons_u ON fasons(type_id, lower(name));
+  CREATE TABLE fason_rates(id INTEGER PRIMARY KEY, fason_id INTEGER NOT NULL, sew_price INTEGER NOT NULL CHECK(sew_price >= 0),
+    extra_price INTEGER NOT NULL DEFAULT 0 CHECK(extra_price >= 0), extra_note TEXT, valid_from TEXT NOT NULL, note TEXT,
+    created_by INTEGER, created_at TEXT NOT NULL);
+  CREATE INDEX fason_rates_f ON fason_rates(fason_id, valid_from);
+  CREATE TABLE flat_rates(id INTEGER PRIMARY KEY, work TEXT NOT NULL CHECK(work IN('bichish','bichish_yordam')),
+    price INTEGER NOT NULL CHECK(price >= 0), valid_from TEXT NOT NULL, note TEXT, created_by INTEGER, created_at TEXT NOT NULL);
+  ALTER TABLE batches ADD COLUMN fason_id INTEGER;
+  ALTER TABLE batches ADD COLUMN pay_on_cut INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE cuts(id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, cutter_id INTEGER, day TEXT NOT NULL, at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN('active','void')), legacy INTEGER NOT NULL DEFAULT 0,
+    helper_id INTEGER, helper_qty INTEGER NOT NULL DEFAULT 0 CHECK(helper_qty >= 0), cut_price INTEGER, helper_price INTEGER,
+    created_by INTEGER, edited_at TEXT, void_at TEXT, void_by INTEGER, void_reason TEXT);
+  CREATE INDEX cuts_b ON cuts(batch_id);
+  CREATE INDEX cuts_c ON cuts(cutter_id, id);
+  CREATE TABLE cut_lines(id INTEGER PRIMARY KEY, cut_id INTEGER NOT NULL, line_id INTEGER NOT NULL,
+    ready INTEGER NOT NULL DEFAULT 0 CHECK(ready >= 0), partial INTEGER NOT NULL DEFAULT 0 CHECK(partial >= 0), UNIQUE(cut_id, line_id));
+  CREATE TABLE cut_edits(id INTEGER PRIMARY KEY, cut_id INTEGER NOT NULL, kind TEXT NOT NULL CHECK(kind IN('edit','void')),
+    at TEXT NOT NULL, day TEXT NOT NULL, actor_id INTEGER NOT NULL, reason TEXT NOT NULL, before TEXT NOT NULL, after TEXT NOT NULL);
+  CREATE INDEX cut_edits_c ON cut_edits(cut_id);
+  ALTER TABLE earnings ADD COLUMN cut_id INTEGER;
+  ALTER TABLE earnings ADD COLUMN extra INTEGER;
+  ALTER TABLE earnings ADD COLUMN note TEXT;
+  -- Eski bichimlar: bir partiyadagi har bir bichish amali (bir vaqtda yozilgan harakatlar) alohida yozuv bo'ladi
+  INSERT INTO cuts(batch_id,cutter_id,day,at,status,legacy,created_by)
+    SELECT l.batch_id, b.cutter_id, MIN(m.day), m.at, 'active', 1, MIN(m.actor_id)
+    FROM moves m JOIN lines l ON l.id=m.line_id JOIN batches b ON b.id=l.batch_id
+    WHERE m.kind IN('cut_ready','cut_partial') AND b.opening=0 GROUP BY l.batch_id, m.at ORDER BY MIN(m.id);
+  INSERT INTO cut_lines(cut_id,line_id,ready,partial)
+    SELECT c.id, m.line_id, SUM(CASE WHEN m.kind='cut_ready' THEN m.qty ELSE 0 END), SUM(CASE WHEN m.kind='cut_partial' THEN m.qty ELSE 0 END)
+    FROM cuts c JOIN lines l ON l.batch_id=c.batch_id JOIN moves m ON m.line_id=l.id AND m.at=c.at AND m.kind IN('cut_ready','cut_partial')
+    GROUP BY c.id, m.line_id;
+  -- Fasonlar: mavjud partiyalardagi (tur + model) juftliklaridan; partiyalar o'z fasoniga bog'lanadi
+  INSERT OR IGNORE INTO fasons(name,type_id,active,created_at)
+    SELECT model, type_id, 1, datetime('now') FROM batches GROUP BY type_id, lower(model) ORDER BY MIN(id);
+  UPDATE batches SET fason_id=(SELECT f.id FROM fasons f WHERE f.type_id=batches.type_id AND lower(f.name)=lower(batches.model));
+  -- Joriy tikish tarifi (bo'lsa) fasonga ko'chiriladi; eski hisoblar o'zgarmaydi
+  INSERT INTO fason_rates(fason_id,sew_price,extra_price,valid_from,note,created_at)
+    SELECT f.id, r.price, 0, date('now','+5 hours'), 'Eski tarifdan ko‘chirildi', datetime('now') FROM fasons f
+    JOIN rates r ON r.id=(SELECT r2.id FROM rates r2 WHERE r2.work='tikish' AND r2.type_id=f.type_id
+      AND (r2.model='' OR lower(r2.model)=lower(f.name)) AND r2.valid_from<=date('now','+5 hours')
+      ORDER BY (r2.model<>'') DESC, r2.valid_from DESC, r2.id DESC LIMIT 1);
+  -- Bichish tarifi barcha fasonlar uchun bitta: 8 000 so'm/dona. Yordamchi tarifi ham boshlanishiga shunday (rahbar o'zgartiradi).
+  INSERT INTO flat_rates(work,price,valid_from,note,created_at) VALUES
+    ('bichish',8000,date('now','+5 hours'),'Boshlang‘ich tarif',datetime('now')),
+    ('bichish_yordam',8000,date('now','+5 hours'),'Boshlang‘ich tarif',datetime('now'));
+  `,
 ];
 
 export function migrate(exec, one) {

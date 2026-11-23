@@ -31,7 +31,14 @@ function flows(ctx, from, to, b) {
   if (b.user_id) { w.push('(m.actor_id=? OR m.to_holder=? OR m.from_holder=?)'); p.push(Number(b.user_id), Number(b.user_id), Number(b.user_id)); }
   const rows = ctx.db.all(`SELECT m.kind, SUM(m.qty) q FROM moves m JOIN lines l ON l.id=m.line_id JOIN batches bt ON bt.id=l.batch_id
     WHERE ${w.join(' AND ')} GROUP BY m.kind`, ...p);
-  return Object.fromEntries(rows.map((r) => [r.kind, r.q]));
+  const out = Object.fromEntries(rows.map((r) => [r.kind, r.q]));
+  // Bichim tuzatishlari va hisobdan chiqarishlar: sanoqqa kiradigan holatlarga sof o'zgarish (+/−)
+  const fx = ctx.db.one(`SELECT COALESCE(SUM(CASE WHEN m.to_state IS NOT NULL AND m.to_state<>'partial' THEN m.qty
+      WHEN m.from_state IS NOT NULL AND m.from_state<>'partial' THEN -m.qty END),0) c,
+      COALESCE(SUM(CASE WHEN m.to_state='partial' THEN m.qty WHEN m.from_state='partial' THEN -m.qty END),0) p
+    FROM moves m JOIN lines l ON l.id=m.line_id JOIN batches bt ON bt.id=l.batch_id WHERE ${w.join(' AND ')} AND m.kind IN('cut_fix','cut_void')`, ...p);
+  out.fix = fx.c; out.fix_partial = fx.p;
+  return out;
 }
 
 export const actions = {
@@ -55,7 +62,7 @@ export const actions = {
           late: att.filter((a) => a.late > 0).length, working: att.filter((a) => a.status === 'working').length, yesterday_no_out: yNoOut,
           absent: staff.filter((u) => !onLeave.includes(u.id) && !att.find((a) => a.user_id === u.id && a.in)).map((u) => fullName(u)),
           leave: staff.filter((u) => onLeave.includes(u.id)).map((u) => fullName(u)) },
-        today: { ready: (f.cut_ready || 0) + (f.partial_done || 0), partial: f.cut_partial || 0, given: f.transfer_reserve || 0,
+        today: { ready: (f.cut_ready || 0) + (f.partial_done || 0) + (f.fix || 0), partial: (f.cut_partial || 0) + (f.fix_partial || 0), given: f.transfer_reserve || 0,
           submitted: f.submit || 0, accepted: f.accept || 0 },
         bal,
         todo: {
@@ -94,13 +101,15 @@ export const actions = {
       const end = balancesAsOf(ctx, to, b, holder);
       // Hisob tenglamasi (filtr faqat partiya/model bo'yicha bo'lganda to'liq ma'noga ega)
       const sumC = (o) => COUNTED.reduce((a, k) => a + o[k], 0);
-      const newReady = (fl.cut_ready || 0) + (fl.partial_done || 0) + (fl.opening || 0);
+      const newReady = (fl.cut_ready || 0) + (fl.partial_done || 0) + (fl.opening || 0) + (fl.fix || 0);
       const eq = holder ? null : { start: sumC(start), newReady, end: sumC(end), ok: sumC(start) + newReady === sumC(end) };
       // Partiya/model bo'yicha jadval
       const f = filterSql(b);
       const byBatch = ctx.db.all(`SELECT bt.id, bt.code, bt.model, bt.material, bt.color, c.name type_name,
-          SUM(CASE WHEN m.kind IN('cut_ready','partial_done') THEN m.qty ELSE 0 END) ready,
-          SUM(CASE WHEN m.kind='cut_partial' THEN m.qty ELSE 0 END) partial,
+          SUM(CASE WHEN m.kind IN('cut_ready','partial_done') THEN m.qty WHEN m.kind IN('cut_fix','cut_void') AND m.to_state='free' THEN m.qty
+            WHEN m.kind IN('cut_fix','cut_void') AND m.from_state='free' THEN -m.qty ELSE 0 END) ready,
+          SUM(CASE WHEN m.kind='cut_partial' THEN m.qty WHEN m.kind IN('cut_fix','cut_void') AND m.to_state='partial' THEN m.qty
+            WHEN m.kind IN('cut_fix','cut_void') AND m.from_state='partial' THEN -m.qty ELSE 0 END) partial,
           SUM(CASE WHEN m.kind='transfer_accept' THEN m.qty ELSE 0 END) given,
           SUM(CASE WHEN m.kind='submit' THEN m.qty ELSE 0 END) submitted,
           SUM(CASE WHEN m.kind='accept' THEN m.qty ELSE 0 END) accepted,
@@ -110,14 +119,16 @@ export const actions = {
         GROUP BY bt.id ORDER BY bt.id DESC LIMIT 200`, from, to, ...f.p, ...(holder ? [holder, holder, holder] : []));
       // Xodimlar bo'yicha
       const byUser = ctx.db.all(`SELECT u.id, u.first_name, u.last_name, u.role,
-          (SELECT COALESCE(SUM(qty),0) FROM moves WHERE actor_id=u.id AND kind IN('cut_ready','partial_done') AND day BETWEEN ? AND ?) cut,
+          ((SELECT COALESCE(SUM(qty),0) FROM moves WHERE actor_id=u.id AND kind IN('cut_ready','partial_done') AND day BETWEEN ? AND ?)
+            + (SELECT COALESCE(SUM(CASE WHEN m.to_state='free' THEN m.qty WHEN m.from_state='free' THEN -m.qty ELSE 0 END),0) FROM moves m JOIN cuts ct ON m.ref='c:'||ct.id
+               WHERE ct.cutter_id=u.id AND m.kind='cut_fix' AND m.day BETWEEN ? AND ?)) cut,
           (SELECT COALESCE(SUM(qty),0) FROM moves WHERE actor_id=u.id AND kind='cut_partial' AND day BETWEEN ? AND ?) partial,
           (SELECT COALESCE(SUM(qty),0) FROM moves WHERE to_holder=u.id AND kind='transfer_accept' AND day BETWEEN ? AND ?) received,
           (SELECT COALESCE(SUM(qty),0) FROM moves WHERE to_holder=u.id AND kind='submit' AND day BETWEEN ? AND ?) submitted,
           (SELECT COALESCE(SUM(qty),0) FROM moves WHERE to_holder=u.id AND kind='accept' AND day BETWEEN ? AND ?) accepted,
           (SELECT COALESCE(SUM(amount),0) FROM earnings WHERE user_id=u.id AND day BETWEEN ? AND ?) earned
         FROM users u WHERE u.role IN('bichuvchi','tikuvchi') AND u.status IN('active','inactive')${holder ? ' AND u.id=?' : ''} ORDER BY u.role, u.first_name`,
-        from, to, from, to, from, to, from, to, from, to, from, to, ...(holder ? [holder] : []));
+        from, to, from, to, from, to, from, to, from, to, from, to, from, to, ...(holder ? [holder] : []));
       return { from, to, flows: fl, start, end, eq, byBatch, byUser: byUser.map((u) => ({ ...u, name: fullName(u) })) };
     },
   },

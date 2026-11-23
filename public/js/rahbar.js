@@ -4,6 +4,7 @@ import {
   qty, val, num, pressed, chips, tape, STATE_NAMES, STATE_COLORS, ava, periodPicker, periodFromBtn, periodRange, dmy, hm, dt, mins, today, getLocation, photoTag, voiceTag,
 } from './core.js';
 import { initOrders } from './buyurtma.js';
+import { cutCard, cutDetail } from './bichim.js';
 
 const L = 'cyr';
 let ME = null;
@@ -22,10 +23,13 @@ const BLOCK = { missing_rate: 'Баъзи ишлар учун тариф бел�
   takeaway_open: 'Олинганлар бўйича очиқ ёзув бор', payable_left: 'Ходимга бериладиган пул қолган' };
 const tag = ([t, c]) => `<span class="tag ${c}">${esc(t)}</span>`;
 const prodLabel = (x) => `${esc(x.type_name || '')} «${esc(x.model)}» · ${esc(x.material)} · ${esc(x.color)}`;
-const gl = (g) => (g.zakaz ? 'Буюртма (заказ)' : `${esc(g.type_name)} «${esc(g.model)}»`);
+const MARK = { fix: ' <span class="tag warn">тузатиш</span>', void: ' <span class="tag bad">ҳисобдан чиқарилди</span>' };
+const gl = (g) => (g.zakaz ? 'Буюртма (заказ)' : `${esc(g.type_name)} «${esc(g.model)}»${g.giver ? ` · улуш берган: ${esc(g.giver)}` : ''}${MARK[g.mark] || ''}`);
+const WN = { bichish: 'Бичиш', tikish: 'Тикиш', bichish_yordam: 'Бичишга ёрдам' };
+const pr = (g) => (g.price == null ? '<span class="tag bad">йўқ</span>' : fmt(g.price) + (g.extra ? `<div class="sub">шундан қўшимча ${fmt(g.extra)}</div>` : ''));
 // «200 та оддий, 4 та буюртма» — оддий ва заказ иши алоҳида
-const cntLine = (gs) => { const W2 = { bichish: 'Бичди', tikish: 'Тикди' }; const out = [];
-  for (const w of ['tikish', 'bichish']) { const a = gs.filter((g) => g.work === w && !g.zakaz).reduce((x, g) => x + g.qty, 0), z = gs.filter((g) => g.work === w && g.zakaz).reduce((x, g) => x + g.qty, 0);
+const cntLine = (gs) => { const W2 = { bichish: 'Бичди', tikish: 'Тикди', bichish_yordam: 'Бичишга ёрдам' }; const out = [];
+  for (const w of ['tikish', 'bichish', 'bichish_yordam']) { const a = gs.filter((g) => g.work === w && !g.zakaz).reduce((x, g) => x + g.qty, 0), z = gs.filter((g) => g.work === w && g.zakaz).reduce((x, g) => x + g.qty, 0);
     if (a || z) out.push(`${W2[w]}: <b>${fmt(a)}</b> та оддий${z ? `, <b>${fmt(z)}</b> та буюртма` : ''}`); }
   return out.length ? `<div class="banner" style="margin-bottom:10px">${out.join(' · ')}</div>` : ''; };
 const nm = (u) => `${u.first_name || ''} ${u.last_name || ''}`.trim();
@@ -125,6 +129,7 @@ async function prod() {
     <button class="big primary" data-act="go" data-s="r_insp"><span class="ic">✔︎</span><span>Текширув<small>${h.todo.inspect} та топшириқ</small></span></button>
     <button class="big" data-act="go" data-s="r_disputes"><span class="ic">⚠︎</span><span>Тафовутлар<small>${h.todo.disputes} та</small></span></button>
     <button class="big" data-act="go" data-s="o_list"><span class="ic">📐</span><span>Буюртмалар<small>Алоҳида заказлар${h.todo.ord_overdue ? ' · ' + h.todo.ord_overdue + ' та кечикди' : ''}</small></span></button>
+    <button class="big" data-act="go" data-s="r_cuts"><span class="ic">✂︎</span><span>Бичимлар<small>Дона, тариф, ҳақ, тузатиш тарихи</small></span></button>
     <button class="big" data-act="go" data-s="r_batches"><span class="ic">▤</span><span>Партиялар</span></button>
     <button class="big" data-act="go" data-s="r_where"><span class="ic">⌖</span><span>Қолдиқ кимда</span></button>
     <button class="big" data-act="go" data-s="r_report"><span class="ic">📊</span><span>Ҳисобот<small>Кун, 10 кун, ой</small></span></button>
@@ -298,7 +303,7 @@ async function payslipScr({ id }) {
   </div>`;
   cache.ps = ps;
   cache.tks = tks;
-  const W = { bichish: 'Бичиш', tikish: 'Тикиш' };
+  const W = WN;
   const n = ps.now;
   const payLi = (p) => `<div class="li"><div class="grow"><b>${fmt(p.amount)} сўм</b> · ${p.kind === 'avans' ? 'аванс' : 'ойлик'}<div class="sub">${esc(p.code)} · ${dmy(p.day)}${p.dispute_note ? ` · ходим: «${esc(p.dispute_note)}»${p.dispute_amount != null ? ' (олдим ' + fmt(p.dispute_amount) + ')' : ''}` : ''}${p.cancel_reason ? ' · ' + esc(p.cancel_reason) : ''}</div></div>
     <div style="text-align:right">${tag(PAY_ST[p.status] || [p.status, ''])}${['pending', 'disputed'].includes(p.status) ? `<br><button class="link" data-act="payCancel" data-id="${p.id}">Бекор қилиш</button>` : p.status === 'confirmed' ? `<br><button class="link" data-act="payReverse" data-id="${p.id}">Тузатиш</button>` : ''}</div></div>`;
@@ -314,7 +319,7 @@ async function payslipScr({ id }) {
   <h2>Ҳисоб варақаси</h2>
   ${periodPicker(L, psP, 'psPer')}
   <div class="card" style="margin-top:10px">
-    ${ps.groups.length ? `${cntLine(ps.groups)}<table class="t"><tr><th>Иш</th><th>Дона</th><th>Тариф</th><th>Сумма</th></tr>${ps.groups.map((g) => `<tr><td>${W[g.work]}: ${gl(g)}</td><td>${fmt(g.qty)}</td><td>${g.price == null ? '<span class="tag bad">йўқ</span>' : fmt(g.price)}</td><td>${g.amount == null ? '—' : fmt(g.amount)}</td></tr>`).join('')}</table>` : '<div class="sub">Бу даврда қабул қилинган иш йўқ.</div>'}
+    ${ps.groups.length ? `${cntLine(ps.groups)}<table class="t"><tr><th>Иш</th><th>Дона</th><th>Тариф</th><th>Сумма</th></tr>${ps.groups.map((g) => `<tr><td>${W[g.work]}: ${gl(g)}</td><td>${fmt(g.qty)}</td><td>${pr(g)}</td><td>${g.amount == null ? '—' : fmt(g.amount)}</td></tr>`).join('')}</table>` : '<div class="sub">Бу даврда қабул қилинган иш йўқ.</div>'}
     ${ps.missingQty ? `<div class="banner warn" style="margin-top:8px">${fmt(ps.missingQty)} дона учун тариф йўқ — сумма тахмин қилинмайди. <button class="link" data-act="go" data-s="r_rates">Тариф белгилаш ›</button></div>` : ''}
     <div class="bal" style="margin-top:12px">
       <span>Давр бошидаги қолдиқ</span><span class="v">${fmt(ps.opening)}</span>
@@ -358,18 +363,57 @@ async function tkScr() {
 
 async function rates() {
   top('Тарифлар');
-  const [r, meta] = await Promise.all([api('rates_list'), cache.meta || api('prod_meta')]);
-  cache.meta = meta;
-  const W = { bichish: 'Бичиш', tikish: 'Тикиш' };
-  return `${backBtn}<h1 class="page">Дона тарифлари</h1><p class="lead">Бичиш ва тикиш тарифлари алоҳида. Эски тариф ўзгармайди: янги нарх янги санадан амал қилади.</p>
+  const [r, z] = await Promise.all([api('tariffs'), api('rates_list')]);
+  cache.tar = r;
+  const fl = (w, name, hint) => `<div class="li"><div class="grow"><b>${name}</b><div class="sub">${hint}${r.flat[w].valid_from ? ' · ' + dmy(r.flat[w].valid_from) + ' дан' : ''}</div></div>
+    <div style="text-align:right"><b class="num">${r.flat[w].price == null ? '<span class="tag bad">йўқ</span>' : fmt(r.flat[w].price)}</b><br><button class="link" data-act="flatSet" data-w="${w}">Ўзгартириш</button></div></div>`;
+  const fasonLi = (f) => `<div class="card${f.active ? '' : ' void'}"><div class="row"><div class="grow"><div class="title">${esc(f.type_name || '')} «${esc(f.name)}»${f.active ? '' : ' <span class="tag">ўчирилган</span>'}</div>
+      ${f.sew ? `<div class="bal" style="margin-top:6px"><span>Тикиш тарифи</span><span class="v">${fmt(f.sew.price)}</span>
+        <span>Қўшимча ҳақ${f.sew.extra_note ? ' (' + esc(f.sew.extra_note) + ')' : ''}</span><span class="v">${f.sew.extra ? '+' + fmt(f.sew.extra) : '—'}</span>
+        <span class="hr"></span><span class="tot">Тикувчига бир дона учун</span><span class="v tot">${fmt(f.sew.total)} сўм</span></div>
+        <div class="sub">${dmy(f.sew.valid_from)} дан амалда${f.next ? ` · ${dmy(f.next.valid_from)} дан ${fmt(f.next.price + f.next.extra)}` : ''}</div>`
+        : '<div class="banner warn" style="margin-top:6px">Тикиш тарифи йўқ — ҳақ ёзилмайди (тахмин қилинмайди).</div>'}</div></div>
+    <div class="actions row2"><button class="btn ghost sm" data-act="fasonRate" data-id="${f.id}">Нархни ўзгартириш</button><button class="btn ghost sm" data-act="fasonEdit" data-id="${f.id}">Фасон</button></div>
+    ${f.history.length > 1 ? `<details style="margin-top:8px"><summary>Нархлар тарихи · ${f.history.length}</summary><table class="t" style="margin-top:6px"><tr><th>Сана</th><th>Тикиш</th><th>Қўшимча</th><th>Жами</th></tr>
+      ${f.history.map((h) => `<tr><td>${dmy(h.valid_from)}</td><td>${fmt(h.sew_price)}</td><td>${h.extra_price ? fmt(h.extra_price) : '—'}</td><td><b>${fmt(h.sew_price + h.extra_price)}</b></td></tr>`).join('')}</table></details>` : ''}</div>`;
+  const old = z.rates.filter((x) => x.work === 'tikish' || x.work === 'bichish');
+  return `${backBtn}<h1 class="page">Тарифлар</h1>
+  <p class="lead">Янги нарх танланган санадан амал қилади. Аввалги ҳисоблар ўша пайтда қўлланган тариф билан қолади.</p>
   ${r.missing && r.missing.n ? `<div class="banner warn">${fmt(r.missing.q)} дона иш учун тариф йўқ эди. Тариф қўшгач, «Тарифсиз ишларга қўллаш»ни босинг.</div><button class="btn ghost" style="margin-top:8px" data-act="ratesFill">Тарифсиз ишларга қўллаш</button>` : ''}
-  <button class="btn dark" style="margin-top:12px" data-act="rateAdd">+ Тариф қўшиш</button>
+  <h2>Бичиш</h2>
+  <div class="list">${fl('bichish', 'Бичиш (барча фасонлар)', 'Бичувчига бир дона учун')}${fl('bichish_yordam', 'Бичишга ёрдам', 'Ёрдамчи тикувчига бир дона учун')}</div>
+  <h2>Фасонлар ва тикиш тарифи <button data-act="fasonNew">+ Фасон</button></h2>
+  ${r.fasons.length ? r.fasons.map(fasonLi).join('') : '<div class="empty">Фасон йўқ. «+ Фасон» билан қўшинг — бичувчи «Бичдим»да шу рўйхатдан танлайди.</div>'}
   <h2>Буюртма (заказ) кўйлак</h2>
-  <div class="card"><p class="sub" style="margin-top:0">Мижоз алоҳида буюртма берган кийим учун бир дона ҳақ. Ойлик варақада оддий ишдан алоҳида қаторда чиқади.</p><div class="bal">
-    <span>Бичиш</span><span class="v">${r.zakaz.bichish == null ? '<span class="tag bad">қўйилмаган</span>' : fmt(r.zakaz.bichish) + ' сўм'}</span>
-    <span>Тикиш</span><span class="v">${r.zakaz.tikish == null ? '<span class="tag bad">қўйилмаган</span>' : fmt(r.zakaz.tikish) + ' сўм'}</span>
+  <div class="card"><p class="sub" style="margin-top:0">Мижоз алоҳида буюртма берган кийим учун бир дона ҳақ.</p><div class="bal">
+    <span>Бичиш</span><span class="v">${z.zakaz.bichish == null ? '<span class="tag bad">қўйилмаган</span>' : fmt(z.zakaz.bichish) + ' сўм'}</span>
+    <span>Тикиш</span><span class="v">${z.zakaz.tikish == null ? '<span class="tag bad">қўйилмаган</span>' : fmt(z.zakaz.tikish) + ' сўм'}</span>
   </div><div class="actions"><button class="btn ghost sm" data-act="ordRates">Заказ тарифини ўзгартириш</button></div></div>
-  ${['tikish', 'bichish'].map((w) => `<h2>${W[w]}</h2>${r.rates.filter((x) => x.work === w).length ? `<div class="list">${r.rates.filter((x) => x.work === w).map((x) => `<div class="li"><div class="grow"><b>${esc(x.type_name)}${x.model ? ' «' + esc(x.model) + '»' : ' (барча моделлар)'}</b><div class="sub">${dmy(x.valid_from)} дан${x.note ? ' · ' + esc(x.note) : ''}</div></div><div class="r">${fmt(x.price)} сўм</div></div>`).join('')}</div>` : '<div class="empty">Тариф йўқ.</div>'}`).join('')}`;
+  ${old.length ? `<details style="margin-top:14px"><summary>Эски тарифлар (тур/модел бўйича, тарих учун)</summary><div class="list" style="margin-top:8px">${old.map((x) => `<div class="li"><div class="grow">${x.work === 'bichish' ? 'Бичиш' : 'Тикиш'}: <b>${esc(x.type_name)}${x.model ? ' «' + esc(x.model) + '»' : ''}</b><div class="sub">${dmy(x.valid_from)} дан</div></div><div class="r">${fmt(x.price)}</div></div>`).join('')}</div></details>` : ''}`;
+}
+
+function fasonTot() {
+  const u = () => { const a = Number(val('sew')) || 0, b = Number(val('extra')) || 0; $('#fTot').textContent = val('sew') === '' ? '' : `Тикувчига бир дона учун жами: ${fmt(a + b)} сўм${b ? ` (${fmt(a)} + қўшимча ${fmt(b)})` : ''}`; };
+  $('#sheetBody').addEventListener('input', u); u();
+}
+
+// ---------- Бичимлар: дона, тариф, ҳақ, тузатиш тарихи; ҳисобдан чиқариш ----------
+let cutF = 'all';
+async function cutsScr() {
+  top('Бичимлар');
+  const q = cutF === 'edited' ? { edited: 1 } : cutF === 'void' ? { status: 'void' } : {};
+  const list = await api('cut_list', { ...q, limit: 100 });
+  return `${backBtn}<h1 class="page">Бичимлар</h1>
+  <p class="lead">Ҳар бир «Бичдим» алоҳида ёзув. Хато ёки синов ёзувини очиб, «Ҳисобдан чиқариш»ни босинг — тизим ўзи танламайди.</p>
+  ${chips('cutF', [['all', 'Барчаси'], ['edited', 'Тузатилган'], ['void', 'Ҳисобдан чиқарилган']], cutF)}
+  <div style="margin-top:10px">${list.length ? list.map((c) => cutCard(c, { cutter: true, screen: 'r_cut' })).join('') : '<div class="empty">Ёзув йўқ.</div>'}</div>`;
+}
+async function cutScr({ id }) {
+  top('Бичим');
+  const c = await api('cut_detail', { cut_id: Number(id) });
+  return cutDetail(c, { extra: `${c.status === 'active' ? `<h2>Хато ёки синов ёзуви бўлса</h2><button class="btn bad" data-act="voidAsk" data-id="${c.id}">Ҳисобдан чиқариш…</button>
+    <p class="hint">Аввал таъсири кўрсатилади (қолдиқ, топширишлар, иш ҳақи). Сиз тасдиқламагунча ҳеч нарса ўзгармайди.</p>` : ''}
+    <button class="btn ghost" style="margin-top:12px" data-act="go" data-s="r_batch" data-id="${c.batch_id}">Партия ҳолати ›</button>` });
 }
 
 // ---------- Созламалар ----------
@@ -398,7 +442,10 @@ async function settings() {
   <div class="chips">${cat.type.map((t) => `<span class="chip">${esc(t.name)}</span>`).join('')}</div>
   <h2>Хавфсизлик</h2>
   <div class="stack"><button class="big" data-act="go" data-s="r_audit"><span class="ic">📜</span><span>Аудит журнали<small>Ким, қачон, нимани ўзгартирди</small></span></button>
-  <button class="big" data-act="export"><span class="ic">💾</span><span>Захира нусха<small>Бутун база ботга файл қилиб юборилади</small></span></button></div>`;
+  <button class="big" data-act="export"><span class="ic">💾</span><span>Захира нусха<small>Бутун база ботга файл қилиб юборилади</small></span></button>
+  <button class="big" data-act="arxivNow"><span class="ic">📦</span><span>Архивни ҳозир юбориш<small>Охирги 7 кун: ҳисоботлар, расмлар, овозлар — ZIP файл. Ҳар якшанба кечаси ўзи ҳам келади</small></span></button></div>
+  <h2>Хато ёки синов ёзувлари</h2>
+  <div class="stack"><button class="big" data-act="go" data-s="r_cuts"><span class="ic">🧾</span><span>Ёзувни ҳисобдан чиқариш<small>Рўйхатдан биттасини танлайсиз, таъсирини кўрасиз, тасдиқлайсиз. База тозаланмайди</small></span></button></div>`;
 }
 
 // Аудит ёзувларини одам тушунадиган матнга ўгириш. Янги амал қўшилса, шу рўйхатга бир қатор қўшилади.
@@ -407,10 +454,11 @@ const AUD = {
   profile_filled: ['📝', 'Маълумотлар тўлдирилди'], request_approved: ['✅', 'Ходим тасдиқланди'], request_rejected: ['⛔', 'Сўров рад этилди'],
   user_deactivated: ['🚪', 'Ходим фаолсизлантирилди'], user_reactivated: ['🔁', 'Ходим қайта фаоллаштирилди'], inspect_right: ['🔎', 'Текшириш ваколати ўзгарди'], remote_changed: ['🏠', 'Иш жойи ўзгартирилди'],
   rahbar_added: ['👑', 'Янги раҳбар қўшилди'], settings_changed: ['⚙️', 'Созламалар ўзгартирилди'], catalog_added: ['➕', 'Каталогга қўшилди'],
-  rate_added: ['💲', 'Тариф белгиланди'], earning_rate_filled: ['💲', 'Иш ҳақига тариф қўйилди'], export: ['💾', 'Захира нусха олинди'],
+  rate_added: ['💲', 'Тариф белгиланди'], earning_rate_filled: ['💲', 'Иш ҳақига тариф қўйилди'], export: ['💾', 'Захира нусха олинди'], archive_requested: ['📦', 'Ҳафталик архив сўралди'], test_data_reset: ['🧹', 'Синов маълумотлари тозаланди'],
   bio_enrolled: ['🔐', 'Биометрика уланди'], bio_reenrolled: ['🔐', 'Биометрика қайта уланди'],
   att_exception_requested: ['🕒', 'Давомат истисноси сўралди'], att_exception_approved: ['🕒', 'Давомат истисноси тасдиқланди'], att_exception_rejected: ['🕒', 'Давомат истисноси рад этилди'],
-  batch_created: ['📦', 'Янги партия очилди'], cut_added: ['✂︎', 'Бичим қўшилди'], opening_added: ['📦', 'Бошланғич қолдиқ киритилди'],
+  batch_created: ['📦', 'Янги партия очилди'], cut_created: ['✂︎', 'Бичдим'], cut_edited: ['✏️', 'Бичим тузатилди'], cut_voided: ['🗑', 'Бичим ёзуви ҳисобдан чиқарилди'],
+  fason_created: ['👗', 'Янги фасон'], fason_updated: ['👗', 'Фасон ўзгартирилди'], fason_rate_set: ['💲', 'Фасон тикиш тарифи'], flat_rate_set: ['💲', 'Бичиш тарифи'], cut_added: ['✂︎', 'Бичим қўшилди'], opening_added: ['📦', 'Бошланғич қолдиқ киритилди'],
   transfer_created: ['➡️', 'Иш берилди'], transfer_cancelled: ['↩️', 'Иш бериш бекор қилинди'], transfer_accepted: ['✅', 'Иш қабул қилинди'],
   transfer_disputed: ['⚠️', 'Иш беришда тафовут'], transfer_resolved: ['✔️', 'Тафовут ҳал қилинди'],
   submitted: ['📤', 'Тикилган иш топширилди'], inspected: ['🔎', 'Иш текширилди'], writeoff: ['🗑', 'Ҳисобдан чиқарилди'],
@@ -523,7 +571,7 @@ async function mjScr() {
   ${r.done.length ? `<h2>Тарих</h2>${r.done.map((a) => card(a, false)).join('')}` : ''}`;
 }
 
-registerScreens({ r_mj: mjScr, r_home: home, r_staff: staff, r_prod: prod, r_money: money, r_set: settings, r_insp: insp, r_disputes: disputes, r_batches: batches, r_batch: batch,
+registerScreens({ r_cuts: cutsScr, r_cut: cutScr, r_mj: mjScr, r_home: home, r_staff: staff, r_prod: prod, r_money: money, r_set: settings, r_insp: insp, r_disputes: disputes, r_batches: batches, r_batch: batch,
   r_where: where, r_report: report, r_att: attRep, r_payslip: payslipScr, r_tk: tkScr, r_rates: rates, r_audit: audit });
 
 // ---------- Тугмалар ----------
@@ -740,6 +788,102 @@ on({
     const r = await act('tk_settle', { id: Number(el.dataset.id), how: pressed('how'), amount: val('amount') === '' ? null : num('amount') }, el);
     await done(`${fmt(r.amount)} сўм ҳисоблашилди. Қолган: ${fmt(r.remaining)}`);
   },
+  flatSet: (el) => {
+    const w = el.dataset.w, cur = cache.tar.flat[w];
+    openSheet(`<h3>${w === 'bichish' ? 'Бичиш тарифи (барча фасонлар)' : 'Бичишга ёрдам тарифи'}</h3>
+      <p class="lead">Ҳозир: ${cur.price == null ? 'йўқ' : fmt(cur.price) + ' сўм/дона'}. Янги нарх танланган санадан амал қилади, аввалги ҳисоблар ўзгармайди.</p>
+      <div class="field"><div class="lbl">Янги нарх, сўм/дона</div><input class="txt" name="price" type="number" inputmode="numeric" min="0" value="${cur.price ?? ''}"></div>
+      <div class="field"><div class="lbl">Қайси санадан</div><input class="txt" name="from" type="date" value="${today()}"></div>
+      ${cur.history.length ? `<details><summary>Тарих</summary><div class="list" style="margin-top:6px">${cur.history.map((h) => `<div class="li"><div class="grow">${dmy(h.valid_from)} дан</div><div class="r">${fmt(h.price)}</div></div>`).join('')}</div></details>` : ''}
+      <div class="foot"><button class="btn dark" data-act="flatSave" data-w="${w}">Сақлаш</button></div>`);
+  },
+  flatSave: async (el) => {
+    if (val('price') === '') return sheetErr('Нархни ёзинг.');
+    await act('flat_rate_set', { work: el.dataset.w, price: Number(val('price')), valid_from: val('from') || today() }, el);
+    await done('Тариф сақланди');
+  },
+  fasonNew: () => {
+    const r = cache.tar;
+    openSheet(`<h3>Янги фасон</h3>
+      <div class="field"><div class="lbl">Маҳсулот тури</div>${chips('ftype', r.types.map((t) => [t.id, t.name]), r.types.length === 1 ? r.types[0].id : '')}</div>
+      <div class="field"><div class="lbl">Фасон номи</div><input class="txt" name="fname" maxlength="60" placeholder="масалан: Лола"></div>
+      <div class="field"><div class="lbl">Тикиш тарифи, сўм/дона</div><input class="txt" name="sew" type="number" inputmode="numeric" min="0" placeholder="масалан: 15000"></div>
+      <div class="row2"><div class="field"><div class="lbl">Қўшимча ҳақ, сўм <span>ихтиёрий</span></div><input class="txt" name="extra" type="number" inputmode="numeric" min="0" placeholder="0"></div>
+        <div class="field"><div class="lbl">Нима учун</div><input class="txt" name="enote" maxlength="80" placeholder="аппликация, тош"></div></div>
+      <p class="hint">Тикувчига бир дона учун жами = тикиш тарифи + қўшимча ҳақ. Қўшимча ҳақ алоҳида кўрсатилади ва бир марта қўшилади.</p>
+      <div class="foot"><div class="sub" id="fTot"></div><button class="btn dark" data-act="fasonSave">Қўшиш</button></div>`);
+    fasonTot();
+  },
+  fasonSave: async (el) => {
+    const type_id = Number(pressed('ftype'));
+    if (!type_id) return sheetErr('Маҳсулот турини танланг.');
+    if (!val('fname')) return sheetErr('Фасон номини ёзинг.');
+    const body = { type_id, name: val('fname') };
+    if (val('sew') !== '') Object.assign(body, { sew_price: Number(val('sew')), extra_price: Number(val('extra')) || 0, extra_note: val('enote') });
+    await act('fason_save', body, el);
+    await done('Фасон қўшилди');
+  },
+  fasonEdit: (el) => {
+    const f = cache.tar.fasons.find((x) => x.id === Number(el.dataset.id));
+    openSheet(`<h3>Фасон</h3>
+      <div class="field"><div class="lbl">Маҳсулот тури</div>${chips('ftype', cache.tar.types.map((t) => [t.id, t.name]), f.type_id)}</div>
+      <div class="field"><div class="lbl">Номи</div><input class="txt" name="fname" maxlength="60" value="${esc(f.name)}"></div>
+      <div class="field"><div class="lbl">Бичувчи рўйхатида</div>${chips('fact', [['1', 'Кўринсин'], ['0', 'Яширилсин']], f.active ? '1' : '0')}</div>
+      <p class="hint">Номни ўзгартириш эски партиялар номини ўзгартирмайди.</p>
+      <div class="foot"><button class="btn dark" data-act="fasonUpd" data-id="${f.id}">Сақлаш</button></div>`);
+  },
+  fasonUpd: async (el) => {
+    await act('fason_save', { id: Number(el.dataset.id), type_id: Number(pressed('ftype')), name: val('fname'), active: pressed('fact') === '1' }, el);
+    await done('Сақланди');
+  },
+  fasonRate: (el) => {
+    const f = cache.tar.fasons.find((x) => x.id === Number(el.dataset.id));
+    const c = f.sew || { price: '', extra: 0, extra_note: '' };
+    openSheet(`<h3>«${esc(f.name)}» тикиш нархи</h3>
+      ${f.sew ? `<div class="bal"><span>Ҳозирги тикиш тарифи</span><span class="v">${fmt(f.sew.price)}</span><span>Ҳозирги қўшимча ҳақ</span><span class="v">${f.sew.extra ? fmt(f.sew.extra) : '—'}</span><span class="tot">Жами</span><span class="v tot">${fmt(f.sew.total)}</span></div>` : ''}
+      <div class="field"><div class="lbl">Янги тикиш тарифи (асосий), сўм/дона</div><input class="txt" name="sew" type="number" inputmode="numeric" min="0" value="${c.price}"></div>
+      <div class="row2"><div class="field"><div class="lbl">Қўшимча ҳақ, сўм</div><input class="txt" name="extra" type="number" inputmode="numeric" min="0" value="${c.extra || ''}" placeholder="0"></div>
+        <div class="field"><div class="lbl">Нима учун</div><input class="txt" name="enote" maxlength="80" value="${esc(c.extra_note || '')}" placeholder="аппликация, тош"></div></div>
+      <div class="field"><div class="lbl">Қайси санадан</div><input class="txt" name="from" type="date" value="${today()}"></div>
+      <p class="hint">Асосий тарифга қўшимча ҳақни қўшиб ёзманг: улар алоҳида майдон, жами пастда бир марта ҳисобланади. Аввалги ҳисоблар ўзгармайди.</p>
+      <div class="foot"><div class="sub" id="fTot"></div><button class="btn dark" data-act="fasonRateSave" data-id="${f.id}">Сақлаш</button></div>`);
+    fasonTot();
+  },
+  fasonRateSave: async (el) => {
+    if (val('sew') === '') return sheetErr('Тикиш тарифини ёзинг.');
+    await act('fason_rate_set', { fason_id: Number(el.dataset.id), sew_price: Number(val('sew')), extra_price: Number(val('extra')) || 0, extra_note: val('enote'), valid_from: val('from') || today() }, el);
+    await done('Нарх сақланди');
+  },
+  voidAsk: async (el) => {
+    const im = await api('cut_void_preview', { cut_id: Number(el.dataset.id) });
+    const S = STATE_NAMES[L];
+    const W = { bichish: 'Бичиш', bichish_yordam: 'Бичишга ёрдам', tikish: 'Тикиш' };
+    const BL = { given: (b) => `Бу партияда бошқа бичимлар ҳам бор ва шу бичимнинг доналари аллақачон берилган: ${b.items.map((i) => `${esc(i.size)} — керак ${fmt(i.need)}, эркин ${fmt(i.have)}`).join('; ')}. Аввал топширишни ҳал қилинг.`,
+      mixed_transfer: (b) => `${b.codes.map(esc).join(', ')} топшириғида бошқа партия доналари ҳам бор. Уни бўлиб бўлмайди — аввал ўша топширишни ҳал қилинг.` };
+    cache.voidSig = im.sig;
+    openSheet(`<h3>Ҳисобдан чиқариш: ${esc(im.cut.code)}</h3>
+      <p class="lead">${esc(im.cut.type_name || '')} «${esc(im.cut.fason_name)}» · ${dmy(im.cut.day)} · ${esc(im.cut.cutter || '')} · ${fmt(im.cut.ready)} дона</p>
+      <h2>Нима ўзгаради</h2>
+      ${im.mode === 'chain' ? '<p class="hint">Бу партиянинг бутун занжири ҳисобдан чиқади: қолдиқ (кимда бўлса ҳам), очиқ топширишлар ва шу доналар учун ёзилган иш ҳақи. Ёзувлар ўчирилмайди — тарихда «ҳисобдан чиқарилган» бўлиб қолади.</p>'
+        : '<p class="hint">Фақат шу бичимнинг эркин ва чала доналари олиб ташланади.</p>'}
+      ${im.stock.length ? `<table class="t"><tr><th>Размер</th><th>Ҳолат</th><th>Дона</th></tr>${im.stock.map((s) => `<tr><td>${esc(s.size)}</td><td>${S[s.state] || s.state}${s.name ? ' · ' + esc(s.name) : ''}</td><td>−${fmt(s.qty)}</td></tr>`).join('')}</table>` : '<div class="sub">Қолдиқ йўқ.</div>'}
+      ${im.transfers.length ? `<h2>Боғлиқ топширишлар</h2><div class="list">${im.transfers.map((t) => `<div class="li"><div class="grow"><b>${esc(t.code)}</b> → ${esc(t.to)}<div class="sub">${esc(t.size)} · ${(TR_ST[t.status] || [t.status])[0]}${['pending', 'disputed'].includes(t.status) ? ' · бекор бўлади' : ''}</div></div><div class="r">${fmt(t.qty)}</div></div>`).join('')}</div>` : ''}
+      ${im.open_submissions ? `<div class="banner warn" style="margin-top:8px">Текширув кутаётган ${fmt(im.open_submissions)} дона ёпилади.</div>` : ''}
+      <h2>Иш ҳақи қайтарилади</h2>
+      ${im.earn.length ? `<table class="t"><tr><th>Ким</th><th>Дона</th><th>Сумма</th></tr>${im.earn.map((e) => `<tr><td>${esc(e.name)}<div class="sub">${W[e.work] || e.work}${e.price != null ? ' · ' + fmt(e.price) : ''}</div></td><td>−${fmt(e.qty)}</td><td>${e.amount == null ? '—' : '−' + fmt(e.amount)}</td></tr>`).join('')}</table>
+        <p class="hint">Қайтариш бугунги сана билан алоҳида қатор бўлиб ёзилади; эски ҳисоблар ўзгармайди.</p>` : '<div class="sub">Иш ҳақи ёзилмаган.</div>'}
+      ${im.warns.length ? `<div class="banner warn" style="margin-top:8px">${im.warns.map((w) => `${esc(w.name)}: ${w.closed ? 'ёпилган давр (' + esc(w.closed) + ')' : ''}${w.rk ? ' тасдиқланган ойлик ҳисоб (' + esc(w.rk) + ')' : ''}`).join('<br>')}<br>Бу ходимнинг жорий ҳисобидан айирилади.</div>` : ''}
+      ${im.blockers.length ? `<div class="banner bad" style="margin-top:10px"><b>Ҳисобдан чиқариб бўлмайди.</b><br>${im.blockers.map((b) => BL[b.code] ? BL[b.code](b) : b.code).join('<br>')}</div>`
+        : `<div class="field" style="margin-top:12px"><div class="lbl">Сабаб (мажбурий)</div><textarea class="txt" name="vreason" maxlength="300" placeholder="Масалан: дастлабки синов ёзуви"></textarea></div>
+        <label class="row" style="gap:10px;margin-top:6px"><input type="checkbox" id="vok" style="width:22px;height:22px"> <span>Таъсирини кўрдим, шу ёзувни ҳисобдан чиқаришни тасдиқлайман</span></label>
+        <div class="foot"><button class="btn bad" data-act="voidDo" data-id="${im.cut.id}">Ҳисобдан чиқариш</button></div>`}`);
+  },
+  voidDo: async (el) => {
+    if (val('vreason').length < 3) return sheetErr('Сабабини ёзинг.');
+    if (!$('#vok').checked) return sheetErr('Тасдиқлаш белгисини қўйинг.');
+    await act('cut_void', { cut_id: Number(el.dataset.id), reason: val('vreason'), confirm: true, sig: cache.voidSig }, el);
+    await done('Ҳисобдан чиқарилди');
+  },
   rateAdd: async () => {
     const meta = cache.meta || (cache.meta = await api('prod_meta'));
     openSheet(`<h3>Тариф қўшиш</h3>
@@ -776,6 +920,7 @@ on({
   },
   typeAdd: () => openSheet(`<h3>Янги маҳсулот тури</h3><div class="field"><input class="txt" name="name" maxlength="60" placeholder="масалан: Пижама" autofocus></div><div class="foot"><button class="btn dark" data-act="typeSave">Қўшиш</button></div>`),
   typeSave: async (el) => { if (!val('name')) return sheetErr('Номини ёзинг.'); await act('catalog_add', { kind: 'type', name: val('name') }, el); cache.meta = null; await done('Қўшилди'); },
+  arxivNow: async (el) => { const r = await act('archive_now', {}, el); toast(`Архив тайёрланмоқда (${r.from.slice(8, 10)}.${r.from.slice(5, 7)}–${r.to.slice(8, 10)}.${r.to.slice(5, 7)}). Бир неча дақиқада Телеграмга келади.`); },
   export: async (el) => { const r = await act('export_all', {}, el); toast(r.sent ? 'Захира нусха ботга юборилди' : 'Юбориб бўлмади. Бот созламасини текширинг.', !r.sent); },
 });
 
@@ -785,4 +930,5 @@ document.addEventListener('change', (e) => { if (e.target.id === 'repU') { repU 
 document.addEventListener('change', (e) => {
   const g = e.target && e.target.dataset && e.target.dataset.group;
   if (g === 'rkper') { rkPer = e.target.dataset.value; refresh(); }
+  if (g === 'cutF') { cutF = e.target.dataset.value; refresh(); }
 });
